@@ -59,7 +59,6 @@ wg_gen_keys() {
         wg_pub=$(cat $wg_keys | jq '.pub')
         wg_prv=$(cat $wg_keys | jq '.prv')
         wg_prv=$(eval echo $wg_prv)
-        $wg_prv
     else 
         wg_prv=$(wg genkey)
         wg_pub=$(echo $wg_prv | wg pubkey)
@@ -85,7 +84,7 @@ wg_check_pubkey() {
     curl_res=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
     expire_date=$(echo $curl_res | jq '.expiresAt')
     expire_date=$(eval echo $expire_date)
-    now=$(date --iso-8601=seconds  --utc)
+    now=$(date -Iseconds --utc)
     register=1
     if [ "${now}" '<' "${expire_date}" ]
     then
@@ -109,7 +108,12 @@ gen_client_confs() {
         srv_conf_file="${srv_conf_file_folder}/$srv_host.conf"
 
         srv_conf="[Interface]\nPrivateKey=$wg_prv\nAddress=10.14.0.2/8\nMTU=1350\n\n[Peer]\nPublicKey=o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo=\nAllowedIPs=172.16.0.36/32\nEndpoint=wgs.prod.surfshark.com:51820\nPersistentKeepalive=25\n\n[Peer]\nPublicKey=$srv_pub\nAllowedIPs=0.0.0.0/0\nEndpoint=$srv_host:51820\nPersistentKeepalive=25\n"
-        echo $srv_conf > $srv_conf_file
+
+        if [ "`echo -e`" = "-e" ]; then
+            echo "$srv_conf" > $srv_conf_file
+        else
+            echo -e "$srv_conf" > $srv_conf_file
+        fi
     done
 }
 

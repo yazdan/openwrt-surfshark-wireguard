@@ -10,7 +10,7 @@ I'm using this to generate configs on openwrt
 To use this file:
 1. copy `config.json.sample` into `config.json`
 2. replace `config.json` values with your account values
-3. run `script.sh`
+3. run `gen_wg_config.sh`
 
 # TODO
 
