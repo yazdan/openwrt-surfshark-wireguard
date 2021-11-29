@@ -3,6 +3,8 @@
 baseurl="https://api.surfshark.com"
 config_file="config.json"
 
+set -e
+
 read_config() {
     conf_json=$(cat $config_file)
     
@@ -108,6 +110,8 @@ gen_client_confs() {
         srv_conf_file="${srv_conf_file_folder}/$srv_host.conf"
 
         srv_conf="[Interface]\nPrivateKey=$wg_prv\nAddress=10.14.0.2/8\nMTU=1350\n\n[Peer]\nPublicKey=o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo=\nAllowedIPs=172.16.0.36/32\nEndpoint=wgs.prod.surfshark.com:51820\nPersistentKeepalive=25\n\n[Peer]\nPublicKey=$srv_pub\nAllowedIPs=0.0.0.0/0\nEndpoint=$srv_host:51820\nPersistentKeepalive=25\n"
+
+        uci_conf=""
 
         if [ "`echo -e`" = "-e" ]; then
             echo "$srv_conf" > $srv_conf_file
