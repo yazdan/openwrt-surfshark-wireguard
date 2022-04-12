@@ -1,17 +1,19 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
 parse_arg() {
-    while getopts 'fhgsC' opt; do
+    while getopts 'fhgdsC' opt; do
         case "$opt" in
             C)  reset_all=1         ;;
             f)  force_register=1    ;;
             g)  generate_conf=0     ;;
+            d)  wireguard_down=1    ;;
             s)  switch_conf=1       ;;
             ?|h)
             echo "Usage: $(basename $0) [-f]"
             echo "  -f force register, ignore checking"
             echo "  -g ignore generating profile files"
+            echo "  -d takedown a surfshark wireguard conf setup with this script"
             echo "  -s switch from one surfshark wireguard conf to another"
             echo "  -C clear keys and profile files before generating new ones"
             exit 1                  ;;
@@ -19,6 +21,7 @@ parse_arg() {
     done
     shift "$(($OPTIND -1))"
 }
+
 
 read_config() {
     config_folder=$(dirname $(readlink -f $0))
@@ -76,7 +79,7 @@ wg_login() {
             esac
             data="{\"username\":\"$username\", \"password\":\"$password\"}"
             token=$(eval echo $token)
-            http_status=$(curl -v -o $tmpfile -s -w "%{http_code}" -d "$data" -H 'Content-Type: application/json' -X POST $url)
+            http_status=$(curl -o $tmpfile -s -w "%{http_code}" -d "$data" -H 'Content-Type: application/json' -X POST $url)
             echo "Login "$url $http_status
         done
         cp $tmpfile $token_file
@@ -105,7 +108,8 @@ get_servers() {
     fi
 }
 
-select_servers() {
+
+select_servers () {
     cat_res=$(cat $servers_file | jq 'select(any(.[].tags[]; . == "p2p" or . == "physical"))')
     echo $cat_res > $selected_servers_file
 }
@@ -123,6 +127,7 @@ wg_gen_keys() {
         echo "{\"pub\":\"$wg_pub\", \"prv\":\"$wg_prv\"}" > $wg_keys
     fi
 }
+
 
 wg_reg_pubkey() {
     curl_res=401
@@ -160,7 +165,7 @@ wg_check_pubkey() {
     until [ $http_status -eq 200 ]; do
         let basen=$basen+1
         if [ $basen -eq 5 ]; then
-            echo "Public Key was not validated & authorised, please try again."
+            echo "Key was not validated & authorised, please try again."
             echo "If it fails repeatedly check your credentials and that key registration has completed."
             rm $tmpfile
             exit 2
@@ -173,7 +178,7 @@ wg_check_pubkey() {
         esac
         data="{\"pubKey\": $wg_pub}"
         token=$(eval echo $token)
-        http_status=$(eval curl -v -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
+        http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
         echo "Validation "$url $http_status
     done
     curl_res=$(cat $tmpfile)
@@ -221,29 +226,32 @@ gen_client_confs() {
 
 surfshark_up() {
     if [ -e ${config_folder}/surfshark ]; then
-        sed -i "s/#Address=/Address=/" $(cat ${config_folder}/surfshark)
-        sed -i "s/#MTU=/MTU=/" $(cat ${config_folder}/surfshark)
-        rm ${config_folder}/surfshark
+        surfshark_down
     fi
-    echo "$(ls -xA ${config_folder}/conf/)"
-    read -p "Please enter your choice of server: " selection
-    read -p "Please enter the interface name: " interface
-    if [ -f ${config_folder}/conf/${selection} ]; then
-        sed -i "s/Address=/#Address=/" ${config_folder}/conf/${selection}
-        sed -i "s/MTU=/#MTU=/" ${config_folder}/conf/${selection} 
-        wg setconf ${interface} ${config_folder}/conf/${selection}
-        echo "${config_folder}/conf/${selection}" >> ${config_folder}/surfshark
+
+    PS3="Please enter your choice: "
+    echo "Please select your preferred server."
+    configs="$(ls -A ${config_folder}/conf/)"
+    select server in ${configs}; do
+        wg-quick up "${config_folder}/conf/${server}"
+        echo "${config_folder}/conf/${server}" >> ${config_folder}/surfshark
+        break
+    done
+}
+
+surfshark_down() {
+    if [ -e ${config_folder}/surfshark ]; then
+        wg_config=$(cat ${config_folder}/surfshark)
+        wg-quick down "${wg_config}"
+        rm ${config_folder}/surfshark
     else
-        echo "server conf not recognised"
-        surfshark_up
+        echo "wireguard not started from this script, please clear manually"
     fi
 }
 
 reset_surfshark() {
     if [ -e ${config_folder}/surfshark ]; then
-        sed -i "s/#Address=/Address=/" $(cat ${config_folder}/surfshark)
-        sed -i "s/#MTU=/MTU=/" $(cat ${config_folder}/surfshark)
-        rm ${config_folder}/surfshark
+        surfshark_down
     fi
     if [ -e ${config_folder}/wg.json ]; then
         echo "Clearing old settings ..."
@@ -261,7 +269,13 @@ if [ $reset_all -eq 1 ]; then
 fi
 
 if [ $switch_conf -eq 1 ]; then
+    surfshark_down
     surfshark_up
+    exit 1
+fi
+
+if [ $wireguard_down -eq 1 ]; then
+    surfshark_down
     exit 1
 fi
 
@@ -292,8 +306,8 @@ echo "Generating profiles..."
     gen_client_confs
 fi
 
-if [ ! -e ${config_folder}/surfshark ]; then
-	surfshark_up
+if [ ! -e ${config_folder}/surfshark ]
+    surfshark_up
 fi
 
 echo "Done!"
