@@ -143,11 +143,11 @@ wg_reg_pubkey() {
         esac
         data="{\"pubKey\": $wg_pub}"
         token=$(eval echo $token)
-        curl_res=$(eval curl -v -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
+        curl_res=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
         echo "Registration "$url $curl_res
-        if [ $curl_res = {"code":401,"message":"Expired JWT Token"} ]; then
+        if [ '$curl_res' = '{"code":401,"message":"Expired JWT Token"}' ]; then
             rm "${config_folder}/token.json"; wg_login
-        elif [ $curl_res = {"code":401,"message":"JWT Token not found"} ]; then
+        elif [ '$curl_res' = '{"code":401,"message":"JWT Token not found"}' ]; then
             wg_login
         fi
     done
@@ -173,7 +173,7 @@ wg_check_pubkey() {
         esac
         data="{\"pubKey\": $wg_pub}"
         token=$(eval echo $token)
-        http_status=$(eval curl -v -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
+        http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
         echo "Validation "$url $http_status
     done
     curl_res=$(cat $tmpfile)
