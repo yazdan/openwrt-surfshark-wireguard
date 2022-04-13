@@ -1,6 +1,42 @@
 #!/bin/bash
 set -e
 
+read_config() {
+    config_folder=$(dirname $(readlink -f $0))
+
+    config_file=${config_folder}/"config.json"
+    conf_json=$(cat $config_file)
+   
+    username="$(echo $conf_json | jq '.username')"
+    username=$(eval echo $username)
+
+    password="$(echo $conf_json | jq '.password')"
+    password=$(eval echo $password)
+
+    wg_keys="${config_folder}/wg.json"
+    token_file="${config_folder}/token.json"
+
+    baseurl_1="https://api.surfshark.com"
+    baseurl_2="https://ux.surfshark.com"
+    baseurl_3="https://api.uymgg1.com"
+    baseurl_4="https://ux.uymgg1.com"
+    urlcount=4
+
+    generic_servers_file="${config_folder}/generic_servers.json"
+    static_servers_file="${config_folder}/static_servers.json"
+    obfuscated_servers_file="${config_folder}/obfuscated_servers.json"
+    double_servers_file="${config_folder}/double_servers.json"
+
+    force_register=0
+    register=1
+    generate_conf=1
+    reset_all=0
+    wireguard_down=0
+    switch_conf=0
+    
+    unset conf_json
+}
+
 parse_arg() {
     while getopts 'fhgdsC' opt; do
         case "$opt" in
@@ -22,42 +58,9 @@ parse_arg() {
     shift "$(($OPTIND -1))"
 }
 
-
-read_config() {
-    config_folder=$(dirname $(readlink -f $0))
-
-    config_file=${config_folder}/"config.json"
-    conf_json=$(cat $config_file)
-   
-    username="$(echo $conf_json | jq '.username')"
-    username=$(eval echo $username)
-
-    password="$(echo $conf_json | jq '.password')"
-    password=$(eval echo $password)
-
-    token_file="${config_folder}/token.json"
-
-    baseurl_1="https://api.surfshark.com"
-    baseurl_2="https://ux.surfshark.com"
-    baseurl_3="https://api.uymgg1.com"
-    baseurl_4="https://ux.uymgg1.com"
-
-    force_register=0
-    register=1
-    generate_conf=1
-    reset_all=0
-    wireguard_down=0
-    switch_conf=0
-
-    selected_servers_file="${config_folder}/selected_servers.json"
-    servers_file="${config_folder}/surf_servers.json"
-    wg_keys="${config_folder}/wg.json"
-    srv_conf_file_folder="${config_folder}/conf"
-    
-    unset conf_json
-}
-
 wg_login() {
+#add in renewal option
+#/v1/auth/renew
     if [ -f "$token_file" ]; then
         curl_res=$(cat $token_file)
     else
@@ -65,18 +68,13 @@ wg_login() {
         http_status=0
         basen=0
         until [ $http_status -eq 200 ]; do
-            let basen=$basen+1
-            if [ $basen -eq 5 ]; then
+            let basen=$basen+1; baseurl=baseurl_$basen
+            if [ $basen -gt $urlcount ]; then
                 echo "Unable to login, check your credentials."
                 rm $tmpfile
                 exit 2
             fi
-            case $basen in
-                1) url="$baseurl_1/v1/auth/login" ;;
-                2) url="$baseurl_2/v1/auth/login" ;;
-                3) url="$baseurl_3/v1/auth/login" ;;
-                4) url="$baseurl_4/v1/auth/login" ;;
-            esac
+            url=$(eval echo \${$baseurl})/v1/auth/login
             data="{\"username\":\"$username\", \"password\":\"$password\"}"
             token=$(eval echo $token)
             http_status=$(curl -o $tmpfile -s -w "%{http_code}" -d "$data" -H 'Content-Type: application/json' -X POST $url)
@@ -84,34 +82,9 @@ wg_login() {
         done
         cp $tmpfile $token_file
         rm $tmpfile
-        token_file="${config_folder}/token.json"
     fi
     token=$(echo $curl_res | jq '.token')
     renewToken=$(echo $curl_res | jq '.renewToken')
-}
-
-get_servers() {
-    if [ -f "$servers_file" ]; then
-        echo "servers list already exist"
-    else
-        tmpfile=$(mktemp /tmp/wg-curl-res.XXXXXX)
-        url="$baseurl_1/v4/server/clusters/generic?countryCode="
-        http_status=$(curl -o $tmpfile -s -w "%{http_code}" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' $url)
-        if [ $http_status -eq 200 ]; then
-            cat $tmpfile > $servers_file
-            rm $tmpfile
-        else
-            echo "Unable to download server information."
-            rm $tmpfile
-            exit 2
-        fi
-    fi
-}
-
-
-select_servers () {
-    cat_res=$(cat $servers_file | jq 'select(any(.[].tags[]; . == "p2p" or . == "physical"))')
-    echo $cat_res > $selected_servers_file
 }
 
 wg_gen_keys() {
@@ -128,24 +101,18 @@ wg_gen_keys() {
     fi
 }
 
-
 wg_reg_pubkey() {
     curl_res=401
     basen=0
     while [ -z "${curl_res##*401*}" ]; do
-        let basen=$basen+1
-        if [ $basen -eq 5 ]; then
+        let basen=$basen+1; baseurl=baseurl_$basen
+        if [ $basen -gt $urlcount ]; then
             echo "Token was not recognised, or Public Key was rejected please try again."
             echo "If it fails repeatedly check your credentials and that a token exists."
             rm $tmpfile
             exit 2
         fi
-        case $basen in
-            1) url="$baseurl_1/v1/account/users/public-keys" ;;
-            2) url="$baseurl_2/v1/account/users/public-keys" ;;
-            3) url="$baseurl_3/v1/account/users/public-keys" ;;
-            4) url="$baseurl_4/v1/account/users/public-keys" ;;
-        esac
+        url=$(eval echo \${$baseurl})/v1/account/users/public-keys
         data="{\"pubKey\": $wg_pub}"
         token=$(eval echo $token)
         curl_res=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
@@ -163,19 +130,14 @@ wg_check_pubkey() {
     http_status=0
     basen=0
     until [ $http_status -eq 200 ]; do
-        let basen=$basen+1
-        if [ $basen -eq 5 ]; then
-            echo "Key was not validated & authorised, please try again."
+        let basen=$basen+1; baseurl=baseurl_$basen
+        if [ $basen -gt $urlcount ]; then
+            echo "Public Key was not validated & authorised, please try again."
             echo "If it fails repeatedly check your credentials and that key registration has completed."
             rm $tmpfile
             exit 2
         fi
-        case $basen in
-            1) url="$baseurl_1/v1/account/users/public-keys/validate" ;;
-            2) url="$baseurl_2/v1/account/users/public-keys/validate" ;;
-            3) url="$baseurl_3/v1/account/users/public-keys/validate" ;;
-            4) url="$baseurl_4/v1/account/users/public-keys/validate" ;;
-        esac
+        url=$(eval echo \${$baseurl})/v1/account/users/public-keys/validate
         data="{\"pubKey\": $wg_pub}"
         token=$(eval echo $token)
         http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
@@ -197,30 +159,77 @@ wg_check_pubkey() {
     rm $tmpfile
 }
 
+get_servers() {
+    mkdir -p "${config_folder}/conf"
+    server_type='generic static obfuscated double'
+    for server in $server_type; do
+        tmpfile=$(mktemp /tmp/wg-curl-res.XXXXXX)
+        http_status=0
+        basen=0
+        until [ $http_status -eq 200 ]; do
+            let basen=$basen+1; baseurl=baseurl_$basen
+            if [ $basen -gt $urlcount ]; then
+                echo "Unable to download server information."
+                rm $tmpfile
+                exit 2
+            fi
+            url=$(eval echo \${$baseurl})/v4/server/clusters/$server?countryCode=
+            http_status=$(curl -o $tmpfile -s -w "%{http_code}" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' $url)
+            echo $server" servers "$url $http_status
+        done
+        server_file="$server""_servers_file"
+        server_file=$(eval echo \${$server_file})
+        cat $tmpfile > $server_file
+        rm $tmpfile
+    done
+}
+
 gen_client_confs() {
-    postf=".surfshark.com"
-    mkdir -p $srv_conf_file_folder
-    server_hosts=$(echo "${cat_res}" | jq -c '.[] | [.connectionName, .pubKey]')
-    for row in $server_hosts; do
-        srv_host="$(echo $row | jq '.[0]')"
-        srv_host=$(eval echo $srv_host)
+    servers='generic static'
+    for server in $servers; do
+        postf=".prod.surfshark.com"
+        server_hosts="$server""_servers_file"
+        server_hosts=$(eval echo \${$server_hosts})
+        server_hosts=$(cat $server_hosts)
+        server_hosts=$(echo "${server_hosts}" | jq -c '.[] | [.connectionName,.load,.tags,.pubKey]')
+        for row in $server_hosts; do
+            srv_host="$(echo $row | jq '.[0]')"
+            srv_host=$(eval echo $srv_host)
 
-        srv_pub="$(echo $row | jq '.[1]')"
-        srv_pub=$(eval echo $srv_pub)
+            srv_load="$(echo $row | jq '.[1]')"
+            srv_load=$(eval echo $srv_load)
 
-        echo "generating config for $srv_host"
+            srv_tags="$(echo $row | jq '.[2]')"
+            srv_tags=$(eval echo $srv_tags)
 
-        srv_conf_file="${srv_conf_file_folder}/${srv_host%$postf}.conf"
+            srv_pub="$(echo $row | jq '.[3]')"
+            srv_pub=$(eval echo $srv_pub)
 
-        srv_conf="[Interface]\nPrivateKey=$wg_prv\nAddress=10.14.0.2/8\nMTU=1350\n\n[Peer]\nPublicKey=o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo=\nAllowedIPs=172.16.0.36/32\nEndpoint=wgs.prod.surfshark.com:51820\nPersistentKeepalive=25\n\n[Peer]\nPublicKey=$srv_pub\nAllowedIPs=0.0.0.0/0\nEndpoint=$srv_host:51820\nPersistentKeepalive=25\n"
+            echo "generating file for $srv_host"
+            
+            file_name=${srv_host%$postf}
+            file_name=${file_name/'-'/'-'$srv_load'-'}
+            srv_tags=$(sed "s/physical//g" <<<"$srv_tags")
+            srv_tags=$(sed "s/\[//g" <<<"$srv_tags")
+            srv_tags=$(sed "s/\]//g" <<<"$srv_tags")
+            srv_tags=$(sed "s/\,//g" <<<"$srv_tags")
+            srv_tags=$(sed "s/\ //g" <<<"$srv_tags")
+            if [ "$srv_tags" = '' ]; then
+				file_name=${server}-${file_name}
+            else
+				file_name=${server}-${file_name}-${srv_tags}
+			fi
 
-        uci_conf=""
+			srv_conf_file=test/${file_name}.conf
 
-        if [ "`echo -e`" = "-e" ]; then
-            echo "$srv_conf" > $srv_conf_file
-        else
-            echo -e "$srv_conf" > $srv_conf_file
-        fi
+            srv_conf="[Interface]\nPrivateKey=$wg_prv\nAddress=10.14.0.2/8\n\n[Peer]\nPublicKey=o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo=\nAllowedIPs=172.16.0.36/32\nEndpoint=wgs.prod.surfshark.com:51820\nPersistentKeepalive=25\n\n[Peer]\nPublicKey=$srv_pub\nAllowedIPs=0.0.0.0/0\nEndpoint=$srv_host:51820\nPersistentKeepalive=25\n"
+            if [ -f "$srv_conf_file" ]; then
+                echo -e "$srv_conf" > $srv_conf_file
+            else
+                echo -e "$srv_conf" >> $srv_conf_file
+            fi
+
+        done
     done
 }
 
@@ -281,11 +290,6 @@ fi
 
 echo "Logging in if needed ..."
 wg_login
-echo "Getting the list of servers ..."
-get_servers
-echo "Selecting servers ..."
-select_servers
-
 echo "Generating keys ..."
 wg_gen_keys
 
@@ -295,12 +299,13 @@ if [ $register -eq 1 ]; then
 else
     echo "No need to register pubkey"
 fi
-
 if [ $force_register -eq 0 ]; then
     echo "Checking pubkey ..."
     wg_check_pubkey
 fi
 
+echo "Getting the list of servers ..."
+get_servers
 if [ $generate_conf -eq 1 ]; then
 echo "Generating profiles..."
     gen_client_confs
