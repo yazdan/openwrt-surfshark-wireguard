@@ -76,7 +76,7 @@ wg_login() {
             esac
             data="{\"username\":\"$username\", \"password\":\"$password\"}"
             token=$(eval echo $token)
-            http_status=$(curl -v -o $tmpfile -s -w "%{http_code}" -d "$data" -H 'Content-Type: application/json' -X POST $url)
+            http_status=$(curl -o $tmpfile -s -w "%{http_code}" -d "$data" -H 'Content-Type: application/json' -X POST $url)
             echo "Login "$url $http_status
         done
         cp $tmpfile $token_file
