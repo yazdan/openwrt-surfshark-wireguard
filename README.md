@@ -7,8 +7,15 @@ You just need to `curl` and `jq`.
 To use this file:
 1. copy `config.json.sample` into `config.json`
 2. replace `config.json` values with your account values. Normally user your "email" and "password" that you use on your official client on Android, iOS, or web, not specially OpenVpn username and password
-3. run `gen_wg_config.sh` or place a link in your run path to be able to call the script as required e.g. ln -sf /etc/config/surfshark/gen_wg_config.sh /usr/bin/surfshark
+3. run `gen_wg_config.sh` or place a link in your run path to be able to call the script as required e.g. `ln -s /etc/config/surfshark/gen_wg_config.sh /usr/bin/surfshark`
 4. for the bash version it will then use wg-quick to bring up your preferred surfshark vpn server
+
+The server configuration files are named in the following way:
+1. Server type, this can be generic (ordinary server suitable for most people), static, obfuscated & double.
+2. Server country in ISO 2 digit format e.g. de for germany us for united states of america
+3. Server load, this indicates how busy the server is. In general using the closest is preferable but if another only slightly further away is under a much lighter load it usually means you would do better to use the less used server.
+4. Server city, this is a 3 letter city code.
+5. Server tags. Unless tagged virtual the servers are physical. The other tag used is P2P indicating servers that fully support P2P usage.
 
 ## usage
 
@@ -21,11 +28,11 @@ Usage: gen_wg_config.sh [-f]
 -d shutdown wireguard
 ```
 
-The -s & -d switches are only in the bash version (ends .bash) not the ash version (ends .sh) as it makes use of features not present in ash including wg-quick.
+The -s & -d switches are only in the bash version (ends .bash) not the ash version (ends .sh) as it makes use of features not present in ash including making use of wg-quick which is a bash script unsuitable for ash. Eventually both scripts should have parity of features.
 
 # Caveats
 
-Please consider following caveats
+Please take the following caveats into consideration
 
 ## Your private/public key expires
 
