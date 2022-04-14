@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-read_config() {
+read_config1() {
     config_folder=$(dirname $(readlink -f $0))
 
     config_file=${config_folder}/"config.json"
@@ -21,11 +21,6 @@ read_config() {
     baseurl_3="https://api.uymgg1.com"
     baseurl_4="https://ux.uymgg1.com"
     urlcount=4
-
-    generic_servers_file="${config_folder}/generic_servers.json"
-    static_servers_file="${config_folder}/static_servers.json"
-    obfuscated_servers_file="${config_folder}/obfuscated_servers.json"
-    double_servers_file="${config_folder}/double_servers.json"
 
     force_register=0
     register=1
@@ -101,32 +96,54 @@ wg_gen_keys() {
     fi
 }
 
+read_config2() {
+    curl_res=$(cat $token_file)
+    token=$(echo $curl_res | jq '.token')
+    renewToken=$(echo $curl_res | jq '.renewToken')
+
+    generic_servers_file="${config_folder}/generic_servers.json"
+    static_servers_file="${config_folder}/static_servers.json"
+    obfuscated_servers_file="${config_folder}/obfuscated_servers.json"
+    double_servers_file="${config_folder}/double_servers.json"
+}
+
 wg_reg_pubkey() {
-    curl_res=401
-    basen=0
-    while [ -z "${curl_res##*401*}" ]; do
-        let basen=$basen+1; baseurl=baseurl_$basen
+    curl_reg=401
+    basen=1
+    reg_error2_count=0
+    while [ -z "${curl_reg##*401*}" ]; do
+        baseurl=baseurl_$basen
         if [ $basen -gt $urlcount ]; then
             echo "Token was not recognised, or Public Key was rejected please try again."
             echo "If it fails repeatedly check your credentials and that a token exists."
-            rm $tmpfile
             exit 2
         fi
         url=$(eval echo \${$baseurl})/v1/account/users/public-keys
         data="{\"pubKey\": $wg_pub}"
         token=$(eval echo $token)
-        curl_res=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
-        echo "Registration "$url $curl_res
-        if [ '$curl_res' = '{"code":401,"message":"Expired JWT Token"}' ]; then
-            rm "${config_folder}/token.json"; wg_login
-        elif [ '$curl_res' = '{"code":401,"message":"JWT Token not found"}' ]; then
-            wg_login
+        curl_reg=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
+        echo "Registration "$url $curl_reg
+        let basen=$basen+1
+        reg_error1="{\"code\":401,\"message\":\"Expired JWT Token\"}"
+        reg_error2="{\"code\":401,\"message\":\"JWT Token not found\"}"
+        if [ ${curl_reg} = ${reg_error1} ]; then
+            rm "${config_folder}/token.json"; wg_login # workaround until renewal can be sorted out
+        elif [ ${curl_reg} = ${reg_error2} ] && [ $reg_error2_count -eq 0 ]; then
+            curl_res=$(cat $token_file)
+            token=$(echo $curl_res | jq '.token')
+            renewToken=$(echo $curl_res | jq '.renewToken')
+            reg_error2_count=1
+            wg_reg_pubkey
+        elif [ ${curl_reg} = ${reg_error2} ] && [ $reg_error2_count -eq 1 ]; then
+            echo "Token was not recognised, or Public Key was rejected please try again."
+            echo "If it fails repeatedly check your credentials and that a token exists."
+            exit 2
         fi
     done
 }
 
 wg_check_pubkey() {
-    tmpfile=$(mktemp /tmp/wg-curl-res.XXXXXX)
+    tmpfile=$(mktemp /tmp/wg-curl-val.XXXXXX)
     http_status=0
     basen=0
     until [ $http_status -eq 200 ]; do
@@ -143,8 +160,8 @@ wg_check_pubkey() {
         http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
         echo "Validation "$url $http_status
     done
-    curl_res=$(cat $tmpfile)
-    expire_date=$(echo $curl_res | jq '.expiresAt')
+    curl_val=$(cat $tmpfile)
+    expire_date=$(echo $curl_val | jq '.expiresAt')
     expire_date=$(eval echo $expire_date)
     now=$(date -Iseconds --utc)
     if [ "${now}" '<' "${expire_date}" ];then
@@ -163,7 +180,7 @@ get_servers() {
     mkdir -p "${config_folder}/conf"
     server_type='generic static obfuscated double'
     for server in $server_type; do
-        tmpfile=$(mktemp /tmp/wg-curl-res.XXXXXX)
+        tmpfile=$(mktemp /tmp/wg-curl-ser.XXXXXX)
         http_status=0
         basen=0
         until [ $http_status -eq 200 ]; do
@@ -186,6 +203,7 @@ get_servers() {
 
 gen_client_confs() {
     servers='generic static'
+    rm 
     for server in $servers; do
         postf=".prod.surfshark.com"
         server_hosts="$server""_servers_file"
@@ -208,19 +226,19 @@ gen_client_confs() {
             echo "generating file for $srv_host"
             
             file_name=${srv_host%$postf}
-            file_name=${file_name/'-'/'-'$srv_load'-'}
-            srv_tags=$(sed "s/physical//g" <<<"$srv_tags")
-            srv_tags=$(sed "s/\[//g" <<<"$srv_tags")
-            srv_tags=$(sed "s/\]//g" <<<"$srv_tags")
-            srv_tags=$(sed "s/\,//g" <<<"$srv_tags")
-            srv_tags=$(sed "s/\ //g" <<<"$srv_tags")
+            file_name=${file_name/'-'/'-'$(printf %03d $srv_load)'-'}
+            srv_tags=${srv_tags/'physical'/}
+            srv_tags=${srv_tags/'['/}
+            srv_tags=${srv_tags/']'/}
+            srv_tags=${srv_tags/','/}
+            srv_tags=${srv_tags//' '/}
             if [ "$srv_tags" = '' ]; then
 				file_name=${server}-${file_name}
             else
 				file_name=${server}-${file_name}-${srv_tags}
 			fi
 
-			srv_conf_file=test/${file_name}.conf
+			srv_conf_file=${config_folder}/conf${file_name}.conf
 
             srv_conf="[Interface]\nPrivateKey=$wg_prv\nAddress=10.14.0.2/8\n\n[Peer]\nPublicKey=o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo=\nAllowedIPs=172.16.0.36/32\nEndpoint=wgs.prod.surfshark.com:51820\nPersistentKeepalive=25\n\n[Peer]\nPublicKey=$srv_pub\nAllowedIPs=0.0.0.0/0\nEndpoint=$srv_host:51820\nPersistentKeepalive=25\n"
             if [ -f "$srv_conf_file" ]; then
@@ -230,6 +248,9 @@ gen_client_confs() {
             fi
 
         done
+        file_removal="$server""_servers_file"
+        file_removal=$(eval echo \${$file_removal})
+        rm -f $file_removal
     done
 }
 
@@ -270,7 +291,7 @@ reset_surfshark() {
     fi
 }
 
-read_config
+read_config1
 parse_arg "$@"
 
 if [ $reset_all -eq 1 ]; then
@@ -292,6 +313,8 @@ echo "Logging in if needed ..."
 wg_login
 echo "Generating keys ..."
 wg_gen_keys
+
+read_config2
 
 if [ $register -eq 1 ]; then
     echo "Registring pubkey ..."
