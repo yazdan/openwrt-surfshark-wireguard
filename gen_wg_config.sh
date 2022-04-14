@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-read_config() {
+read_config1() {
     config_folder=$(dirname $(readlink -f $0))
 
     config_file=${config_folder}/"config.json"
@@ -22,11 +22,6 @@ read_config() {
     baseurl_4="https://ux.uymgg1.com"
     urlcount=4
 
-    generic_servers_file="${config_folder}/generic_servers.json"
-    static_servers_file="${config_folder}/static_servers.json"
-    obfuscated_servers_file="${config_folder}/obfuscated_servers.json"
-    double_servers_file="${config_folder}/double_servers.json"
-
     force_register=0
     register=1
     generate_conf=1
@@ -38,12 +33,12 @@ read_config() {
 }
 
 parse_arg() {
-    while getopts 'fhgsC' opt; do
+    while getopts 'fhgC' opt; do
         case "$opt" in
             C)  reset_all=1         ;;
             f)  force_register=1    ;;
             g)  generate_conf=0     ;;
-            s)  switch_conf=1       ;;
+#            s)  switch_conf=1       ;;
             ?|h)
             echo "Usage: $(basename $0) [-f]"
             echo "  -f force register, ignore checking"
@@ -99,32 +94,55 @@ wg_gen_keys() {
     fi
 }
 
+read_config2() {
+    curl_res=$(cat $token_file)
+    token=$(echo $curl_res | jq '.token')
+    renewToken=$(echo $curl_res | jq '.renewToken')
+
+    generic_servers_file="${config_folder}/generic_servers.json"
+    static_servers_file="${config_folder}/static_servers.json"
+    obfuscated_servers_file="${config_folder}/obfuscated_servers.json"
+    double_servers_file="${config_folder}/double_servers.json"
+}
+
 wg_reg_pubkey() {
-    curl_res=401
-    basen=0
-    while [ -z "${curl_res##*401*}" ]; do
-        let basen=$basen+1; baseurl=baseurl_$basen
+    curl_reg=401
+    basen=1
+    reg_error2_count=0
+    while [ -z "${curl_reg##*401*}" ]; do
+        baseurl=baseurl_$basen
         if [ $basen -gt $urlcount ]; then
             echo "Token was not recognised, or Public Key was rejected please try again."
             echo "If it fails repeatedly check your credentials and that a token exists."
-            rm $tmpfile
+
             exit 2
         fi
         url=$(eval echo \${$baseurl})/v1/account/users/public-keys
         data="{\"pubKey\": $wg_pub}"
         token=$(eval echo $token)
-        curl_res=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
-        echo "Registration "$url $curl_res
-        if [ '$curl_res' = '{"code":401,"message":"Expired JWT Token"}' ]; then
-            rm "${config_folder}/token.json"; wg_login
-        elif [ '$curl_res' = '{"code":401,"message":"JWT Token not found"}' ]; then
-            wg_login
+        curl_reg=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
+        echo "Registration "$url $curl_reg
+        let basen=$basen+2
+        reg_error1="{\"code\":401,\"message\":\"Expired JWT Token\"}"
+        reg_error2="{\"code\":401,\"message\":\"JWT Token not found\"}"
+        if [ ${curl_reg} = ${reg_error1} ]; then
+            rm "${config_folder}/token.json"; wg_login # workaround until renewal can be sorted out
+        elif [ ${curl_reg} = ${reg_error2} ] && [ $reg_error2_count -eq 0 ]; then
+            curl_res=$(cat $token_file)
+            token=$(echo $curl_res | jq '.token')
+            renewToken=$(echo $curl_res | jq '.renewToken')
+            reg_error2_count=1
+            wg_reg_pubkey
+        elif [ ${curl_reg} = ${reg_error2} ] && [ $reg_error2_count -eq 1 ]; then
+            echo "Token was not recognised, or Public Key was rejected please try again."
+            echo "If it fails repeatedly check your credentials and that a token exists."
+            exit 2
         fi
     done
 }
 
 wg_check_pubkey() {
-    tmpfile=$(mktemp /tmp/wg-curl-res.XXXXXX)
+    tmpfile=$(mktemp /tmp/wg-curl-val.XXXXXX)
     http_status=0
     basen=0
     until [ $http_status -eq 200 ]; do
@@ -141,8 +159,8 @@ wg_check_pubkey() {
         http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
         echo "Validation "$url $http_status
     done
-    curl_res=$(cat $tmpfile)
-    expire_date=$(echo $curl_res | jq '.expiresAt')
+    curl_val=$(cat $tmpfile)
+    expire_date=$(echo $curl_val | jq '.expiresAt')
     expire_date=$(eval echo $expire_date)
     now=$(date -Iseconds --utc)
     if [ "${now}" '<' "${expire_date}" ];then
@@ -158,10 +176,9 @@ wg_check_pubkey() {
 }
 
 get_servers() {
-    mkdir -p "${config_folder}/conf"
     server_type='generic static obfuscated double'
     for server in $server_type; do
-        tmpfile=$(mktemp /tmp/wg-curl-res.XXXXXX)
+        tmpfile=$(mktemp /tmp/wg-curl-ser.XXXXXX)
         http_status=0
         basen=0
         until [ $http_status -eq 200 ]; do
@@ -183,7 +200,9 @@ get_servers() {
 }
 
 gen_client_confs() {
-    servers='generic static'
+    mkdir -p "${config_folder}/conf"
+    rm -f ${config_folder}/conf/*.conf
+    servers='generic static' # still need to work on obfuscated & double, they will need separate conf gens
     for server in $servers; do
         postf=".prod.surfshark.com"
         server_hosts="$server""_servers_file"
@@ -206,7 +225,7 @@ gen_client_confs() {
             echo "generating file for $srv_host"
             
             file_name=${srv_host%$postf}
-            file_name=${file_name/'-'/'-'$srv_load'-'}
+            file_name=${file_name/'-'/'-'$(printf %03d $srv_load)'-'}
             srv_tags=${srv_tags/'physical'/}
             srv_tags=${srv_tags/'['/}
             srv_tags=${srv_tags/']'/}
@@ -229,57 +248,86 @@ gen_client_confs() {
             fi
 
         done
+        file_removal="$server""_servers_file"
+        file_removal=$(eval echo \${$file_removal})
+        rm -f $file_removal
     done
 }
 
 surfshark_up() {
-#automate the following
+    network_test1=$(grep -w -e surfshark /etc/config/network)
+    network_test2=$(grep -w -e wireguard /etc/config/network)
+    if [ ! $(set -f -- $network_test1; echo $#) -gt 0 ] || [ ! $(set -f -- $network_test2; echo $#) -gt 0 ]; then
+        wg_prv=$(cat $wg_keys | jq '.prv')
+        wg_prv=$(eval echo $wg_prv)
+        uci add network device
+        uci set network.@device[-1]=device
+        uci set network.@device[-1].name='surfshark'
+        uci set network.@device[-1].ipv6='0'
+        uci set network.@device[-1].promisc='1'
+        uci set network.@device[-1].acceptlocal='1'
+        uci commit
+        uci set network.surfshark=interface
+        uci set network.surfshark.proto='wireguard'
+        uci set network.surfshark.private_key=${wg_prv}
+        uci set network.surfshark.listen_port='51820'
+        uci set network.surfshark.addresses='10.14.0.2/8'
+        uci commit
+        uci add network wireguard_surfshark
+        uci set network.@wireguard_surfshark[-1]=wireguard_surfshark
+        uci set network.@wireguard_surfshark[-1].description='wgs'
+        uci set network.@wireguard_surfshark[-1].public_key='o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo='
+        uci set network.@wireguard_surfshark[-1].allowed_ips='172.16.0.36/32'
+        uci set network.@wireguard_surfshark[-1].route_allowed_ips='1'
+        uci set network.@wireguard_surfshark[-1].endpoint_host='wgs.prod.surfshark.com'
+        uci set network.@wireguard_surfshark[-1].endpoint_port='51820'
+        uci set network.@wireguard_surfshark[-1].persistent_keepalive='25'
+        uci commit network
+        /etc/init.d/network restart
+    else
+        echo "No changes made to the network"
+    fi
 
-#NETWORK
-
-#config interface 'surfshark'
-#        option proto 'wireguard'
-#        option private_key '$wg_prv'
-#        list addresses '10.14.0.2/8'
-
-#config wireguard_surfshark
-#        option description 'wgs'
-#        option public_key 'o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo='
-#        list allowed_ips '172.16.0.36/32'
-#        option endpoint_host 'wgs.prod.surfshark.com'
-#        option endpoint_port '51820'
-#        option persistent_keepalive '25'
-
-#config wireguard_surfshark
-#        option description '$conf_desc'
-#        option public_key '$conf_pub_key'
-#        list allowed_ips '0.0.0.0/0'
-#        option endpoint_host '$conf_endpoint_host'
-#        option endpoint_port '51820'
-#        option persistent_keepalive '25'
-
-#FIREWALL
-
-#config zone
-#        option name 'wireguard'
-#        option input 'REJECT'
-#        option output 'ACCEPT'
-#        option forward 'REJECT'
-#        option masq '1'
-#        option mtu_fix '1'
-#        list network 'surfshark'
-
-#config forwarding
-#        option src 'lan'
-#        option dest 'wireguard' 
-  
+    firewall_test1=$(grep -w -e surfsharkwg /etc/config/firewall)
+    firewall_test2=$(grep -w -e surfshark /etc/config/firewall)
+    if [ ! $(set -f -- $firewall_test1; echo $#) -gt 0 ] || [ ! $(set -f -- $firewall_test2; echo $#) -gt 0 ]; then
+        uci add firewall zone
+        uci set firewall.@zone[-1]=zone
+        uci set firewall.@zone[-1].name='surfsharkwg'
+        uci set firewall.@zone[-1].input='REJECT'
+        uci set firewall.@zone[-1].output='ACCEPT'
+        uci set firewall.@zone[-1].forward='REJECT'
+        uci set firewall.@zone[-1].masq='1'
+        uci set firewall.@zone[-1].mtu_fix='1'
+        uci set firewall.@zone[-1].network='surfshark'
+        uci commit
+        uci add firewall forwarding
+        uci set firewall.@forwarding[-1]=forwarding
+        uci set firewall.@forwarding[-1].src='lan'
+        uci set firewall.@forwarding[-1].dest='surfsharkwg'
+        uci commit
+        /etc/init.d/firewall restart
+    else
+        echo "No changes made to the firewall"
+    fi
+ 
     echo "$(ls -xA ${config_folder}/conf/)"
     read -p "Please enter your choice of server: " selection
-    read -p "Please enter the interface name: " interface
     if [ -f ${config_folder}/conf/${selection} ]; then
-        sed -i "s/Address=/#Address=/" ${config_folder}/conf/${selection}
-        sed -i "s/MTU=/#MTU=/" ${config_folder}/conf/${selection} 
-        wg setconf ${interface} ${config_folder}/conf/${selection}
+        peer_desc=$(awk -F '=' '$1 ~ /^d/ {print $2}' ${config_folder}/conf/${selection})
+        peer_key=$(awk -F '=' '$1 ~ /^p/ {print $2}' ${config_folder}/conf/${selection})
+        peer_host=$(awk -F '=' '$1 ~ /^e/ {print $2}' ${config_folder}/conf/${selection})
+        uci add network wireguard_surfshark
+        uci set network.@wireguard_surfshark[-1]=wireguard_surfshark
+        uci set network.@wireguard_surfshark[-1].description=${peer_desc}
+        uci set network.@wireguard_surfshark[-1].public_key=${peer_key}=
+        uci set network.@wireguard_surfshark[-1].allowed_ips='0.0.0.0/0'
+        uci set network.@wireguard_surfshark[-1].route_allowed_ips='1'
+        uci set network.@wireguard_surfshark[-1].endpoint_host=${peer_host}
+        uci set network.@wireguard_surfshark[-1].endpoint_port='51820'
+        uci set network.@wireguard_surfshark[-1].persistent_keepalive='25'
+        uci commit network
+        /etc/init.d/network restart
         echo "${config_folder}/conf/${selection}" >> ${config_folder}/surfshark
     else
         echo "server conf not recognised"
@@ -288,36 +336,36 @@ surfshark_up() {
 }
 
 reset_surfshark() {
-    if [ -e ${config_folder}/surfshark ]; then
-        sed -i "s/#Address=/Address=/" $(cat ${config_folder}/surfshark)
-        sed -i "s/#MTU=/MTU=/" $(cat ${config_folder}/surfshark)
-        rm ${config_folder}/surfshark
-    fi
+#    if [ -e ${config_folder}/surfshark ]; then
+#        rm ${config_folder}/surfshark
+#    fi
     if [ -e ${config_folder}/wg.json ]; then
         echo "Clearing old settings ..."
-        rm -fr ${config_folder}/conf ${config_folder}/selected_servers.json ${config_folder}/surf_servers.json ${config_folder}/token.json ${config_folder}/wg.json
+        rm -fr ${config_folder}/conf ${config_folder}/token.json ${config_folder}/wg.json
     else
         echo "No old keys or profiles found."
     fi
 }
 
-read_config
+read_config1
 parse_arg "$@"
 
 if [ $reset_all -eq 1 ]; then
     reset_surfshark
 fi
 
-if [ $switch_conf -eq 1 ]; then
-    surfshark_up
-    exit 1
-fi
+#if [ $switch_conf -eq 1 ]; then
+#    surfshark_up
+#    exit 1
+#fi
 
 echo "Logging in if needed ..."
 wg_login
 
 echo "Generating keys ..."
 wg_gen_keys
+
+read_config2
 
 if [ $register -eq 1 ]; then
     echo "Registring pubkey ..."
