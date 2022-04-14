@@ -2,7 +2,6 @@
 set -e
 
 read_config() {
-
     config_folder=$(dirname $(readlink -f $0))
 
     config_file=${config_folder}/"config.json"
@@ -36,7 +35,6 @@ read_config() {
     switch_conf=0
 
     unset conf_json
-
 }
 
 parse_arg() {
@@ -209,18 +207,18 @@ gen_client_confs() {
             
             file_name=${srv_host%$postf}
             file_name=${file_name/'-'/'-'$srv_load'-'}
-            srv_tags=$(sed "s/physical//g" <<<"$srv_tags")
-            srv_tags=$(sed "s/\[//g" <<<"$srv_tags")
-            srv_tags=$(sed "s/\]//g" <<<"$srv_tags")
-            srv_tags=$(sed "s/\,//g" <<<"$srv_tags")
-            srv_tags=$(sed "s/\ //g" <<<"$srv_tags")
+            srv_tags=${srv_tags/'physical'/}
+            srv_tags=${srv_tags/'['/}
+            srv_tags=${srv_tags/']'/}
+            srv_tags=${srv_tags/','/}
+            srv_tags=${srv_tags//' '/}
             if [ "$srv_tags" = '' ]; then
 				file_name=${server}-${file_name}
             else
 				file_name=${server}-${file_name}-${srv_tags}
 			fi
 
-			srv_conf_file=test/${file_name}.conf
+			srv_conf_file=${config_folder}/conf/${file_name}.conf
 
             srv_conf="[Peer]\ndescription=${srv_host%$postf}\npublic_key=$srv_pub\nendpoint_host=$srv_host"
 
@@ -231,7 +229,7 @@ gen_client_confs() {
             fi
 
         done
-	done
+    done
 }
 
 surfshark_up() {
