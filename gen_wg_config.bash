@@ -113,7 +113,8 @@ read_config2() {
 wg_reg_pubkey() {
     curl_reg=401
     basen=1
-    error_count=0
+    error_count_et=0
+    error_count_nt=0
     while [ -z "${curl_reg##*401*}" ]; do
         baseurl=baseurl_$basen
         if [ $basen -gt $urlcount ]; then
@@ -127,19 +128,19 @@ wg_reg_pubkey() {
         curl_reg=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
         echo "Registration "$url $curl_reg
         let basen=$basen+2
-        if [ -z "${curl_reg##*Expired*}" ]; then
+        if [ -z "${curl_reg##*Expired*}" ] && [ $error_count_et -eq 0 ]; then
             rm -f ${config_folder}/token.json ${config_folder}/wg.json  # temp solution
             wg_login                                                    # until renewal
             wg_gen_keys                                                 # is sorted
-            basen=1                                              #
-            continue                                                       #
-        elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count -eq 0 ]; then
+            basen=1                                                     #
+            error_count_et=1                                            #
+        elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count_nt -eq 0 ]; then
             curl_res=$(cat $token_file)
             token=$(echo $curl_res | jq '.token')
             renewToken=$(echo $curl_res | jq '.renewToken')
-            error_count=1
+            error_count_nt=1
             basen=1
-        elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count -eq 1 ]; then
+        elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count_nt -eq 1 ]; then
             echo "Token was not recognised, or Public Key was rejected please try again."
             echo "If it fails repeatedly check your credentials and that a token exists."
             exit 2
