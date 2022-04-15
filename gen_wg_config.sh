@@ -27,23 +27,26 @@ read_config1() {
     generate_conf=1
     reset_all=0
     wireguard_down=0
+    generate_servers=0
     switch_conf=0
 
     unset conf_json
 }
 
 parse_arg() {
-    while getopts 'fhgC' opt; do
+    while getopts 'fhgrC' opt; do
         case "$opt" in
             C)  reset_all=1         ;;
             f)  force_register=1    ;;
             g)  generate_conf=0     ;;
+            r)  generate_servers=1   ;;
 #            s)  switch_conf=1       ;;
             ?|h)
             echo "Usage: $(basename $0) [-f]"
             echo "  -f force register, ignore checking"
-            echo "  -g ignore generating profile files"
-            echo "  -s switch from one surfshark wireguard conf to another"
+            echo "  -g skip generating server conf files"
+            echo "  -r regenerate the server conf files"
+#            echo "  -s switch from one surfshark wireguard conf to another"
             echo "  -C clear keys and profile files before generating new ones"
             exit 1                  ;;
         esac
@@ -108,7 +111,7 @@ read_config2() {
 wg_reg_pubkey() {
     curl_reg=401
     basen=1
-    reg_error2_count=0
+    error_count=0
     while [ -z "${curl_reg##*401*}" ]; do
         baseurl=baseurl_$basen
         if [ $basen -gt $urlcount ]; then
@@ -123,17 +126,19 @@ wg_reg_pubkey() {
         curl_reg=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
         echo "Registration "$url $curl_reg
         let basen=$basen+2
-        reg_error1="{\"code\":401,\"message\":\"Expired JWT Token\"}"
-        reg_error2="{\"code\":401,\"message\":\"JWT Token not found\"}"
-        if [ ${curl_reg} = ${reg_error1} ]; then
-            rm "${config_folder}/token.json"; wg_login # workaround until renewal can be sorted out
-        elif [ ${curl_reg} = ${reg_error2} ] && [ $reg_error2_count -eq 0 ]; then
+        if [ -z "${curl_reg##*Expired*}" ]; then
+            rm -f ${config_folder}/token.json ${config_folder}/wg.json  # temp solution
+            wg_login                                                    # until renewal
+            wg_gen_keys                                                 # is sorted
+            basen=1                                              #
+            continue                                                       #
+        elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count -eq 0 ]; then
             curl_res=$(cat $token_file)
             token=$(echo $curl_res | jq '.token')
             renewToken=$(echo $curl_res | jq '.renewToken')
-            reg_error2_count=1
-            wg_reg_pubkey
-        elif [ ${curl_reg} = ${reg_error2} ] && [ $reg_error2_count -eq 1 ]; then
+            error_count=1
+            basen=1
+        elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count -eq 1 ]; then
             echo "Token was not recognised, or Public Key was rejected please try again."
             echo "If it fails repeatedly check your credentials and that a token exists."
             exit 2
@@ -266,13 +271,11 @@ surfshark_up() {
         uci set network.@device[-1].ipv6='0'
         uci set network.@device[-1].promisc='1'
         uci set network.@device[-1].acceptlocal='1'
-        uci commit
         uci set network.surfshark=interface
         uci set network.surfshark.proto='wireguard'
         uci set network.surfshark.private_key=${wg_prv}
         uci set network.surfshark.listen_port='51820'
         uci set network.surfshark.addresses='10.14.0.2/8'
-        uci commit
         uci add network wireguard_surfshark
         uci set network.@wireguard_surfshark[-1]=wireguard_surfshark
         uci set network.@wireguard_surfshark[-1].description='wgs'
@@ -300,12 +303,11 @@ surfshark_up() {
         uci set firewall.@zone[-1].masq='1'
         uci set firewall.@zone[-1].mtu_fix='1'
         uci set firewall.@zone[-1].network='surfshark'
-        uci commit
         uci add firewall forwarding
         uci set firewall.@forwarding[-1]=forwarding
         uci set firewall.@forwarding[-1].src='lan'
         uci set firewall.@forwarding[-1].dest='surfsharkwg'
-        uci commit
+        uci commit firewall
         /etc/init.d/firewall restart
     else
         echo "No changes made to the firewall"
@@ -341,7 +343,7 @@ reset_surfshark() {
 #    fi
     if [ -e ${config_folder}/wg.json ]; then
         echo "Clearing old settings ..."
-        rm -fr ${config_folder}/conf ${config_folder}/token.json ${config_folder}/wg.json
+        rm -fr ${config_folder}/conf ${config_folder}/*servers.json ${config_folder}/token.json ${config_folder}/wg.json
     else
         echo "No old keys or profiles found."
     fi
@@ -352,6 +354,13 @@ parse_arg "$@"
 
 if [ $reset_all -eq 1 ]; then
     reset_surfshark
+fi
+
+if [ $generate_servers -eq 1 ]; then
+    read_config2
+    get_servers
+    gen_client_confs
+    exit 1
 fi
 
 #if [ $switch_conf -eq 1 ]; then
