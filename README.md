@@ -22,8 +22,9 @@ The server configuration files are named in the following way:
 ```shell
 Usage: gen_wg_config.sh [-f]
 -f forces registeration, ignores validation
--g ignore generating profile files
+-g ignore generating server configuration profile files
 -C clear keys and profile files before generating new ones
+-r regenerate server configuration profiles
 -s switch from one surfshark wireguard conf to another
 -d shutdown wireguard
 ```

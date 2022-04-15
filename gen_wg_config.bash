@@ -28,23 +28,26 @@ read_config1() {
     reset_all=0
     wireguard_down=0
     switch_conf=0
+    generate_servers=0
     
     unset conf_json
 }
 
 parse_arg() {
-    while getopts 'fhgdsC' opt; do
+    while getopts 'fhgdrsC' opt; do
         case "$opt" in
             C)  reset_all=1         ;;
             f)  force_register=1    ;;
             g)  generate_conf=0     ;;
             d)  wireguard_down=1    ;;
+            r)  generate_servers=1  ;;
             s)  switch_conf=1       ;;
             ?|h)
             echo "Usage: $(basename $0) [-f]"
             echo "  -f force register, ignore checking"
             echo "  -g ignore generating profile files"
             echo "  -d takedown a surfshark wireguard conf setup with this script"
+            echo "  -r regenerate the server conf files"
             echo "  -s switch from one surfshark wireguard conf to another"
             echo "  -C clear keys and profile files before generating new ones"
             exit 1                  ;;
@@ -223,7 +226,7 @@ gen_client_confs() {
             srv_pub="$(echo $row | jq '.[3]')"
             srv_pub=$(eval echo $srv_pub)
 
-            echo "generating file for $srv_host"
+#            echo "generating file for $srv_host"
             
             file_name=${srv_host%$postf}
             file_name=${file_name/'-'/'-'$(printf %03d $srv_load)'-'}
@@ -285,7 +288,7 @@ reset_surfshark() {
     fi
     if [ -e ${config_folder}/wg.json ]; then
         echo "Clearing old settings ..."
-        rm -fr ${config_folder}/conf ${config_folder}/selected_servers.json ${config_folder}/surf_servers.json ${config_folder}/token.json ${config_folder}/wg.json
+        rm -fr ${config_folder}/conf ${config_folder}/*servers.json ${config_folder}/token.json ${config_folder}/wg.json
     else
         echo "No old keys or profiles found."
     fi
@@ -296,6 +299,15 @@ parse_arg "$@"
 
 if [ $reset_all -eq 1 ]; then
     reset_surfshark
+fi
+
+if [ $generate_servers -eq 1 ]; then
+    read_config2
+    get_servers
+    gen_client_confs
+    echo "server list now:"
+    echo "$(ls -xA ${config_folder}/conf/)"
+    exit 1
 fi
 
 if [ $switch_conf -eq 1 ]; then

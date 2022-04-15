@@ -39,7 +39,7 @@ parse_arg() {
             C)  reset_all=1         ;;
             f)  force_register=1    ;;
             g)  generate_conf=0     ;;
-            r)  generate_servers=1   ;;
+            r)  generate_servers=1  ;;
 #            s)  switch_conf=1       ;;
             ?|h)
             echo "Usage: $(basename $0) [-f]"
@@ -227,7 +227,7 @@ gen_client_confs() {
             srv_pub="$(echo $row | jq '.[3]')"
             srv_pub=$(eval echo $srv_pub)
 
-            echo "generating file for $srv_host"
+#            echo "generating file for $srv_host"
             
             file_name=${srv_host%$postf}
             file_name=${file_name/'-'/'-'$(printf %03d $srv_load)'-'}
@@ -360,6 +360,8 @@ if [ $generate_servers -eq 1 ]; then
     read_config2
     get_servers
     gen_client_confs
+    echo "server list now:"
+    echo "$(ls -xA ${config_folder}/conf/)"
     exit 1
 fi
 
