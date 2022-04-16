@@ -183,7 +183,6 @@ wg_check_pubkey() {
 }
 
 get_servers() {
-    mkdir -p "${config_folder}/conf"
     server_type='generic static obfuscated double'
     for server in $server_type; do
         tmpfile=$(mktemp /tmp/wg-curl-ser.XXXXXX)
