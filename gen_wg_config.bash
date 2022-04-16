@@ -208,8 +208,9 @@ get_servers() {
 }
 
 gen_client_confs() {
+    mkdir -p "${config_folder}/conf"
+    rm -f ${config_folder}/conf/*.conf
     servers='generic static'
-    rm 
     for server in $servers; do
         postf=".prod.surfshark.com"
         server_hosts="$server""_servers_file"
