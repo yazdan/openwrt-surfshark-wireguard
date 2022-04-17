@@ -20,8 +20,8 @@ To use this file:
 Usage: gen_wg_config.sh [-f]
   -f force register ignore checking
   -g ignore generating profile files
-  -r regenerate the server conf files
-  -C clear all keys and confs before running
+  -r regenerate the server conf files ** bash script only
+  -C clear all keys and confs before running ** bash script only
 ```
 
 # Caveates
