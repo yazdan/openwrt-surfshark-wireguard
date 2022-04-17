@@ -1,20 +1,15 @@
 #!/bin/bash
 set -e
 
-read_config1() {
+read_config() {
     config_folder=$(dirname $(readlink -f $0))
 
-    config_file=${config_folder}/"config.json"
-    conf_json=$(cat $config_file)
-   
-    username="$(echo $conf_json | jq '.username')"
-    username=$(eval echo $username)
-
-    password="$(echo $conf_json | jq '.password')"
-    password=$(eval echo $password)
+    username=$(eval echo $(jq '.username' ${config_folder}/config.json))
+    password=$(eval echo $(jq '.password' ${config_folder}/config.json))
 
     wg_keys="${config_folder}/wg.json"
     token_file="${config_folder}/token.json"
+    token_expires="${config_folder}/token_expires.json"
 
     baseurl_1="https://api.surfshark.com"
     baseurl_2="https://ux.surfshark.com"
@@ -22,23 +17,28 @@ read_config1() {
     baseurl_4="https://ux.uymgg1.com"
     urlcount=4
 
+    generic_servers_file="${config_folder}/generic_servers.json"
+    static_servers_file="${config_folder}/static_servers.json"
+    obfuscated_servers_file="${config_folder}/obfuscated_servers.json"
+    double_servers_file="${config_folder}/double_servers.json"
+
     force_register=0
     register=1
     generate_conf=1
     reset_all=0
     wireguard_down=0
+    wireguard_up=0
     switch_conf=0
     generate_servers=0
-    
-    unset conf_json
 }
 
 parse_arg() {
-    while getopts 'fhgdrsC' opt; do
+    while getopts 'fhgudrsC' opt; do
         case "$opt" in
             C)  reset_all=1         ;;
             f)  force_register=1    ;;
             g)  generate_conf=0     ;;
+            u)  wireguard_up=1      ;;
             d)  wireguard_down=1    ;;
             r)  generate_servers=1  ;;
             s)  switch_conf=1       ;;
@@ -47,6 +47,7 @@ parse_arg() {
             echo "  -f force register, ignore checking"
             echo "  -g ignore generating profile files"
             echo "  -d takedown a surfshark wireguard conf setup with this script"
+            echo "  -u bring up a surfshark wireguard conf setup with this script"
             echo "  -r regenerate the server conf files"
             echo "  -s switch from one surfshark wireguard conf to another"
             echo "  -C clear keys and profile files before generating new ones"
@@ -99,17 +100,6 @@ wg_gen_keys() {
     fi
 }
 
-read_config2() {
-    curl_res=$(cat $token_file)
-    token=$(echo $curl_res | jq '.token')
-    renewToken=$(echo $curl_res | jq '.renewToken')
-
-    generic_servers_file="${config_folder}/generic_servers.json"
-    static_servers_file="${config_folder}/static_servers.json"
-    obfuscated_servers_file="${config_folder}/obfuscated_servers.json"
-    double_servers_file="${config_folder}/double_servers.json"
-}
-
 wg_reg_pubkey() {
     curl_reg=401
     basen=1
@@ -135,9 +125,8 @@ wg_reg_pubkey() {
             basen=1                                                     #
             error_count_et=1                                            #
         elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count_nt -eq 0 ]; then
-            curl_res=$(cat $token_file)
-            token=$(echo $curl_res | jq '.token')
-            renewToken=$(echo $curl_res | jq '.renewToken')
+            token=$(eval echo $(jq '.token' $token_file))
+            renewToken=$(eval echo $(jq '.renewToken' $token_file))
             error_count_nt=1
             basen=1
         elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count_nt -eq 1 ]; then
@@ -166,11 +155,10 @@ wg_check_pubkey() {
         http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
         echo "Validation "$url $http_status
     done
-    curl_val=$(cat $tmpfile)
-    expire_date=$(echo $curl_val | jq '.expiresAt')
-    expire_date=$(eval echo $expire_date)
+    expire_date=$(eval echo $(jq '.expiresAt' $tmpfile))
     now=$(date -Iseconds --utc)
     if [ "${now}" '<' "${expire_date}" ];then
+        cp -f $tmpfile $token_expires
         register=0
         echo "TODAYS DATE"              # Display Run Date
         echo ""${now}""                 # and Time
@@ -183,6 +171,7 @@ wg_check_pubkey() {
 }
 
 get_servers() {
+    mkdir -p "${config_folder}/conf"
     server_type='generic static obfuscated double'
     for server in $server_type; do
         tmpfile=$(mktemp /tmp/wg-curl-ser.XXXXXX)
@@ -207,9 +196,8 @@ get_servers() {
 }
 
 gen_client_confs() {
-    mkdir -p "${config_folder}/conf"
-    rm -f ${config_folder}/conf/*.conf
     servers='generic static'
+    rm 
     for server in $servers; do
         postf=".prod.surfshark.com"
         server_hosts="$server""_servers_file"
@@ -229,8 +217,6 @@ gen_client_confs() {
             srv_pub="$(echo $row | jq '.[3]')"
             srv_pub=$(eval echo $srv_pub)
 
-#            echo "generating file for $srv_host"
-            
             file_name=${srv_host%$postf}
             file_name=${file_name/'-'/'-'$(printf %03d $srv_load)'-'}
             srv_tags=${srv_tags/'physical'/}
@@ -243,16 +229,10 @@ gen_client_confs() {
             else
 				file_name=${server}-${file_name}-${srv_tags}
 			fi
-
 			srv_conf_file=${config_folder}/conf${file_name}.conf
 
             srv_conf="[Interface]\nPrivateKey=$wg_prv\nAddress=10.14.0.2/8\n\n[Peer]\nPublicKey=o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo=\nAllowedIPs=172.16.0.36/32\nEndpoint=wgs.prod.surfshark.com:51820\nPersistentKeepalive=25\n\n[Peer]\nPublicKey=$srv_pub\nAllowedIPs=0.0.0.0/0\nEndpoint=$srv_host:51820\nPersistentKeepalive=25\n"
-            if [ -f "$srv_conf_file" ]; then
-                echo -e "$srv_conf" > $srv_conf_file
-            else
-                echo -e "$srv_conf" >> $srv_conf_file
-            fi
-
+            echo -e "$srv_conf" > $srv_conf_file
         done
         file_removal="$server""_servers_file"
         file_removal=$(eval echo \${$file_removal})
@@ -270,7 +250,7 @@ surfshark_up() {
     configs="$(ls -A ${config_folder}/conf/)"
     select server in ${configs}; do
         wg-quick up "${config_folder}/conf/${server}"
-        echo "${config_folder}/conf/${server}" >> ${config_folder}/surfshark
+        cp -f "${config_folder}/conf/${server}" ${config_folder}/surfshark
         break
     done
 }
@@ -289,15 +269,17 @@ reset_surfshark() {
     if [ -e ${config_folder}/surfshark ]; then
         surfshark_down
     fi
-    if [ -e ${config_folder}/wg.json ]; then
-        echo "Clearing old settings ..."
-        rm -fr ${config_folder}/conf ${config_folder}/*servers.json ${config_folder}/token.json ${config_folder}/wg.json
-    else
-        echo "No old keys or profiles found."
-    fi
+
+    echo "Clearing old settings ..."
+    rm -fr ${config_folder}/conf
+    rm -f ${config_folder}/*servers.json
+    rm -f ${config_folder}/wg.json
+    rm -f ${config_folder}/token.json
+    rm -f ${config_folder}/token_expires.json
+    rm -f ${config_folder}/surfshark
 }
 
-read_config1
+read_config
 parse_arg "$@"
 
 if [ $reset_all -eq 1 ]; then
@@ -305,7 +287,6 @@ if [ $reset_all -eq 1 ]; then
 fi
 
 if [ $generate_servers -eq 1 ]; then
-    read_config2
     get_servers
     gen_client_confs
     echo "server list now:"
@@ -319,6 +300,32 @@ if [ $switch_conf -eq 1 ]; then
     exit 1
 fi
 
+if [ $wireguard_up -eq 1 ]; then
+    if [ -f $token_expires ]; then
+        expire_date=$(eval echo $(jq '.expiresAt' $token_expires))
+        now=$(date -Iseconds --utc)
+        if [ "${now}" '<' "${expire_date}" ]; then
+            surfshark_up
+            exit 1
+        else
+            wg_reg_pubkey
+            wg_check_pubkey
+            get_servers
+            gen_client_confs
+            surfshark_up
+            exit 1
+        fi
+        wg_login
+        wg_gen_keys
+        wg_reg_pubkey
+        wg_check_pubkey
+        get_servers
+        gen_client_confs
+        surfshark_up
+        exit 1
+    fi
+fi
+
 if [ $wireguard_down -eq 1 ]; then
     surfshark_down
     exit 1
@@ -328,8 +335,6 @@ echo "Logging in if needed ..."
 wg_login
 echo "Generating keys ..."
 wg_gen_keys
-
-read_config2
 
 if [ $register -eq 1 ]; then
     echo "Registring pubkey ..."
