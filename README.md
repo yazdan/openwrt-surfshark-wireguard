@@ -26,10 +26,11 @@ Usage: gen_wg_config.sh [-f]
 -C clear keys and profile files before generating new ones
 -r regenerate server configuration profiles
 -s switch from one surfshark wireguard conf to another
+-u bring up wireguard
 -d shutdown wireguard
 ```
 
-The -s & -d switches are only in the bash version (ends .bash) not the ash version (ends .sh) as it makes use of features not present in ash including making use of wg-quick which is a bash script unsuitable for ash. Eventually both scripts should have parity of features.
+The -u & -d switches are only in the bash version (ends .bash) not the ash version (ends .sh) as it makes use of features not present in ash including making use of wg-quick which is a bash script unsuitable for ash. Eventually both scripts should have parity of features.
 
 # Caveats
 
