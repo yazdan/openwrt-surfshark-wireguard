@@ -7,9 +7,9 @@ read_config() {
     username=$(eval echo $(jq '.username' ${config_folder}/config.json))
     password=$(eval echo $(jq '.password' ${config_folder}/config.json))
 
-    wg_keys="${config_folder}/wg.json"
-    token_file="${config_folder}/token.json"
-    token_expires="${config_folder}/token_expires.json"
+    wg_keys=${config_folder}/wg.json
+    token_file=${config_folder}/token.json
+    token_expires=${config_folder}/token_expires.json
 
     baseurl_1="https://api.surfshark.com"
     baseurl_2="https://ux.surfshark.com"
@@ -17,10 +17,10 @@ read_config() {
     baseurl_4="https://ux.uymgg1.com"
     urlcount=4
 
-    generic_servers_file="${config_folder}/generic_servers.json"
-    static_servers_file="${config_folder}/static_servers.json"
-    obfuscated_servers_file="${config_folder}/obfuscated_servers.json"
-    double_servers_file="${config_folder}/double_servers.json"    
+    generic_servers_file=${config_folder}/generic_servers.json
+    static_servers_file=${config_folder}/static_servers.json
+    obfuscated_servers_file=${config_folder}/obfuscated_servers.json
+    double_servers_file=${config_folder}/double_servers.json   
 
     force_register=0
     register=1
@@ -55,26 +55,27 @@ parse_arg() {
 wg_login() {
 #add in renewal option
 #/v1/auth/renew
-    http_status=0
-    basen=0
-    until [ $http_status -eq 200 ]; do
+    if [ -f "$token_file" ]; then
+        echo "login not required ..."
+    else
         tmpfile=$(mktemp /tmp/wg-curl-res.XXXXXX)
-        let basen=$basen+1; baseurl=baseurl_$basen
-        if [ $basen -gt $urlcount ]; then
-            echo "Unable to login, check your credentials."
-            rm $tmpfile
-            exit 2
-        fi
-        url=$(eval echo \${$baseurl})/v1/auth/login
-        data="{\"username\":\"$username\", \"password\":\"$password\"}"
-        token=$(eval echo $token)
-        http_status=$(curl -o $tmpfile -s -w "%{http_code}" -d "$data" -H 'Content-Type: application/json' -X POST $url)
-        echo "Login "$url $http_status
+        http_status=0
+        basen=0
+        until [ $http_status -eq 200 ]; do
+            let basen=$basen+1; baseurl=baseurl_$basen
+            if [ $basen -gt $urlcount ]; then
+                echo "Unable to login, check your credentials."
+                rm $tmpfile
+                exit 2
+            fi
+            url=$(eval echo \${$baseurl})/v1/auth/login
+            data="{\"username\":\"$username\", \"password\":\"$password\"}"
+            http_status=$(curl -o $tmpfile -s -w "%{http_code}" -d "$data" -H 'Content-Type: application/json' -X POST $url)
+            echo "Login "$url $http_status
+        done
         cp $tmpfile $token_file
         rm $tmpfile
-    done
-    token=$(eval echo $(jq '.token' $token_file))
-    renewToken=$(eval echo $(jq '.renewToken' $token_file))
+    fi
 }
 
 wg_gen_keys() {
@@ -104,8 +105,8 @@ wg_reg_pubkey() {
         fi
         url=$(eval echo \${$baseurl})/v1/account/users/public-keys
         data="{\"pubKey\": $wg_pub}"
-        token=$(eval echo $token)
-        curl_reg=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
+        token=$(eval echo $(jq '.token' $token_file))
+        curl_reg=$(eval curl -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d \'$data\' -X POST $url)
         echo "Registration "$url $curl_reg
         let basen=$basen+2
         if [ -z "${curl_reg##*Expired*}" ] && [ $error_count_et -eq 0 ]; then
@@ -116,7 +117,6 @@ wg_reg_pubkey() {
             basen=1                                                     #
         elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count_nt -eq 0 ]; then
             token=$(eval echo $(jq '.token' $token_file))
-            renewToken=$(eval echo $(jq '.renewToken' $token_file))
             error_count_nt=1
             basen=1
         elif [ -z "${curl_reg##*Token not found*}" ] && [ $error_count_nt -eq 1 ]; then
@@ -125,6 +125,10 @@ wg_reg_pubkey() {
             exit 2
         fi
     done
+    if [ -z "${curl_reg##*Bad Request*}" ]; then
+        echo "Token appears to be malformed"
+        exit 2
+    fi
 }
 
 wg_check_pubkey() {
@@ -141,8 +145,8 @@ wg_check_pubkey() {
         fi
         url=$(eval echo \${$baseurl})/v1/account/users/public-keys/validate
         data="{\"pubKey\": $wg_pub}"
-        token=$(eval echo $token)
-        http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
+        token=$(eval echo $(jq '.token' $token_file))
+        http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d \'$data\' -X POST $url)
         echo "Validation "$url $http_status
     done
     expire_date=$(eval echo $(jq '.expiresAt' $tmpfile))
@@ -174,6 +178,7 @@ get_servers() {
                 exit 2
             fi
             url=$(eval echo \${$baseurl})/v4/server/clusters/$server?countryCode=
+            token=$(eval echo $(jq '.token' $token_file))
             http_status=$(curl -o $tmpfile -s -w "%{http_code}" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' $url)
             echo $server" servers "$url $http_status
         done

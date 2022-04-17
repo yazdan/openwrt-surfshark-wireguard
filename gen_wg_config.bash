@@ -61,7 +61,7 @@ wg_login() {
 #add in renewal option
 #/v1/auth/renew
     if [ -f "$token_file" ]; then
-        curl_res=$(cat $token_file)
+        echo "login not required ..."
     else
         tmpfile=$(mktemp /tmp/wg-curl-res.XXXXXX)
         http_status=0
@@ -75,15 +75,12 @@ wg_login() {
             fi
             url=$(eval echo \${$baseurl})/v1/auth/login
             data="{\"username\":\"$username\", \"password\":\"$password\"}"
-            token=$(eval echo $token)
             http_status=$(curl -o $tmpfile -s -w "%{http_code}" -d "$data" -H 'Content-Type: application/json' -X POST $url)
             echo "Login "$url $http_status
         done
         cp $tmpfile $token_file
         rm $tmpfile
     fi
-    token=$(echo $curl_res | jq '.token')
-    renewToken=$(echo $curl_res | jq '.renewToken')
 }
 
 wg_gen_keys() {
@@ -114,8 +111,8 @@ wg_reg_pubkey() {
         fi
         url=$(eval echo \${$baseurl})/v1/account/users/public-keys
         data="{\"pubKey\": $wg_pub}"
-        token=$(eval echo $token)
-        curl_reg=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
+        token=$(eval echo $(jq '.token' $token_file))
+        curl_reg=$(eval curl -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d \'$data\' -X POST $url)
         echo "Registration "$url $curl_reg
         let basen=$basen+2
         if [ -z "${curl_reg##*Expired*}" ] && [ $error_count_et -eq 0 ]; then
@@ -151,8 +148,8 @@ wg_check_pubkey() {
         fi
         url=$(eval echo \${$baseurl})/v1/account/users/public-keys/validate
         data="{\"pubKey\": $wg_pub}"
-        token=$(eval echo $token)
-        http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\" -d \'$data\' -X POST $url)
+        token=$(eval echo $(jq '.token' $token_file))
+        http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d \'$data\' -X POST $url)
         echo "Validation "$url $http_status
     done
     expire_date=$(eval echo $(jq '.expiresAt' $tmpfile))
@@ -185,6 +182,7 @@ get_servers() {
                 exit 2
             fi
             url=$(eval echo \${$baseurl})/v4/server/clusters/$server?countryCode=
+            token=$(eval echo $(jq '.token' $token_file))
             http_status=$(curl -o $tmpfile -s -w "%{http_code}" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' $url)
             echo $server" servers "$url $http_status
         done
