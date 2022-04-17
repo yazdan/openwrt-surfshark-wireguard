@@ -20,6 +20,7 @@ To use this file:
 Usage: gen_wg_config.sh [-f]
   -f force register ignore checking
   -g ignore generating profile files
+  -C clear all keys and confs before running
 ```
 
 # Caveates
