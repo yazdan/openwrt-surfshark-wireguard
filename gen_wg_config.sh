@@ -50,9 +50,6 @@ parse_arg() {
     shift "$(($OPTIND -1))"
 }
 
-    username=$(eval echo $(jq '.username' ${config_file}))
-    password=$(eval echo $(jq '.password' ${config_file}))
-
 wg_login() {
 #add in renewal option
 #/v1/auth/renew
@@ -120,7 +117,7 @@ wg_reg_pubkey() { # register the public key using the jwt token
         url=$(eval echo \${$baseurl})/v1/account/users/public-keys
         data='{"pubKey":'$(jq '.pub' $wg_keys)'}'
         token="Authorization: Bearer $(eval echo $(jq '.token' $token_file))"
-        key_reg=$(curl -H "${token}" -H "Content-Type: application/json" -d "${data}"-X POST ${url})
+        key_reg=$(curl -H "${token}" -H "Content-Type: application/json" -d "${data}" -X POST ${url})
         echo "Registration "$url $key_reg
         let basen=$basen+2
         if [ -n "${key_reg##*expiresAt*}" ]; then
@@ -206,9 +203,8 @@ wg_token_renwal() {
             exit 2
         fi
         url=$(eval echo \${$baseurl})/v1/auth/renew
-        data='{"pubKey":'$(jq '.pub' $wg_keys)'}'
         token="Authorization: Bearer $(eval echo $(jq '.renewToken' $token_file))"
-        key_ren=$(curl -H "${token}" -H "Content-Type: application/json" -d "${data}"-X POST ${url})
+        key_ren=$(curl -H "${token}" -H "Content-Type: application/json" -X POST ${url})
         echo "Renewal "$url $key_ren
         let basen=$basen+2
         if [ -n "${key_ren##*expiresAt*}" ]; then
@@ -464,11 +460,11 @@ echo "Registring public key ..."
 wg_register_pub
 
 if [ $generate_conf -eq 1 ]; then
-echo "Getting the list of servers ..."
-get_servers
+    echo "Getting the list of servers ..."
+    get_servers
 
-echo "Generating server profiles ..."
-gen_client_confs
+    echo "Generating server profiles ..."
+    gen_client_confs
 fi
 
 if [ ! -e ${config_folder}/surfshark ]; then
