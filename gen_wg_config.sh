@@ -25,9 +25,10 @@ read_config() {
     generate_conf=1
     reset_all=0
     wireguard_down=0
-    generate_servers=0
+    wireguard_up=0
     switch_conf=0
     check_status=0
+    generate_servers=0
     renew_token=0
 }
 
@@ -47,7 +48,7 @@ parse_arg() {
             echo "  -n renew tokens"
             echo "  -r regenerate the server conf files"
             echo "  -s switch from one surfshark wireguard server to another"
-            echo "  -Z clear settings, keys and server profile files."
+            echo "  -Z clear settings, keys and server profile files"
             exit 1                  ;;
         esac
     done
@@ -88,7 +89,6 @@ wg_register_pub() { # check to see if the public key has been registered and/or 
         wg_check_pubkey
     elif [ $(eval echo $(jq '.pubKey' $token_expires)) = $(eval echo $(jq '.pub' $wg_keys)) ] && [ $(eval echo $(jq '.expiresAt' $token_expires)) '<' $(eval echo $(date -Iseconds -u)) ]; then
         wg_token_renwal
-#        wg_reg_pubkey
         wg_check_pubkey
     elif [ $(eval echo $(jq '.pubKey' $token_expires)) = $(eval echo $(jq '.pub' $wg_keys)) ]; then
         wg_check_pubkey
@@ -453,7 +453,6 @@ fi
 
 if [ $renew_token -eq 1 ]; then
         wg_token_renwal
-#        wg_reg_pubkey
         wg_check_pubkey
     exit 1
 fi
