@@ -184,8 +184,6 @@ wg_check_pubkey() { # validates the public key registration process and confirms
         if [ "${now}" '<' "${expire_date}" ]; then
             echo "Current Date & Time  "${now}          # Display Run Date
             echo "Token will Expire at "${expire_date}  # Display Token Expiry
-            echo "Current Date & Time  "${now} >${config_folder}/Key_Expiry.txt 2>&1          # Display Run Date
-            echo "Token will Expire at "${expire_date} >>${config_folder}/Key_Expiry.txt 2>&1  # Display Token Expiry
             logger -t SSWG "RUN DATE:${now}   TOKEN EXPIRES ON: ${expire_date}" # Log Status Information (logread -e SSWG)
         fi
     fi
