@@ -44,7 +44,7 @@ parse_arg() {
             n)  renew_token=1       ;;
             r)  generate_servers=1  ;;
             ?|h)
-            echo "Usage: $(basename $0) [-f]"
+            echo "Usage: $(basename $0) [-h]"
             echo "  -g ignore generating profile files"
             echo "  -n renew tokens"
             echo "  -r regenerate the server conf files"
@@ -64,14 +64,14 @@ wg_login() { #login and recieve jwt token and renewal token
     until [ $http_status -eq 200 ]; do
         let basen=$basen+1; baseurl=baseurl_$basen
         if [ $basen -gt $urlcount ]; then
-            echo "Unable to login, check your credentials."
+            echo "[wg_login] Unable to login, check your credentials."
             rm $tmpfile
             exit 100
         fi
         url=$(eval echo \${$baseurl})/v1/auth/login
         data='{"username":"'${username}'","password":"'${password}'"}'
         http_status=$(curl -o $tmpfile -w "%{http_code}" -d "$data" -H 'Content-Type: application/json' -X POST $url)
-        echo "[$(date -Iseconds)] Login "$url $http_status $(cat $tmpfile) >> $sswg_log
+        echo "[$(date -Iseconds)] [wg_login] Login "$url $http_status $(cat $tmpfile) >> $sswg_log
     done
     rm -f $token_file
     echo $(cat $tmpfile | jq '.') >> $token_file
@@ -79,7 +79,7 @@ wg_login() { #login and recieve jwt token and renewal token
 }
 
 wg_gen_keys() { # generate priavte/public key pair
-    echo "generating new keys"
+    echo "[wg_gen_keys] generating new keys"
     wg_prv=$(wg genkey)
     wg_pub=$(echo $wg_prv | wg pubkey)
     rm -f $wg_keys
@@ -108,11 +108,11 @@ wg_user_status() { # get current status of user
     url=$baseurl_1/v1/server/user
     token="Authorization: Bearer $(eval echo $(jq '.token' $token_file))"
     user_status=$(curl -H "${token}" -H "Content-Type: application/json" ${url} | jq '.')
-    echo "[$(date -Iseconds)] User Status "$url $user_status >> $sswg_log
+    echo "[$(date -Iseconds)] [wg_user_status] User Status "$url $user_status >> $sswg_log
     if [ $(echo $user_status | jq '.secured') ]; then
-        echo "surfshark wireguard is currently on and your IP info is "$(echo $user_status | jq '.ip, .city, .country')
+        echo "[wg_user_status] surfshark wireguard is currently on and your IP info is "$(echo $user_status | jq '.ip, .city, .country')
     else
-        echo "surfshark wireguard is currently off and your IP info is "$(echo $user_status | jq '.ip, city, .country')
+        echo "[wg_user_status] surfshark wireguard is currently off and your IP info is "$(echo $user_status | jq '.ip, city, .country')
     fi
 }
 
@@ -126,12 +126,12 @@ wg_reg_pubkey() { # register the public key using the jwt token
         data='{"pubKey":'$(jq '.pub' $wg_keys)'}'
         token="Authorization: Bearer $(eval echo $(jq '.token' $token_file))"
         key_reg=$(curl -H "${token}" -H "Content-Type: application/json" -d "${data}" -X POST ${url} | jq '.')
-        echo "[$(date -Iseconds)] Registration "$url $key_reg >> $sswg_log
+        echo "[$(date -Iseconds)] [wg_reg_pubkey] Registration "$url $key_reg >> $sswg_log
         let basen=$basen+2
         if [ -n "${key_reg##*expiresAt*}" ] && [ $basen -gt $urlcount ]; then
             if [ -z "${key_reg##*400*}" ]; then
                 if [ -z "${key_reg##*Bad Request*}" ]; then
-                    echo "Curl post appears to be malformed"
+                    echo "[wg_reg_pubkey] Curl post appears to be malformed"
                     exit 110
                 fi
             elif [ -z "${key_reg##*401*}" ]; then
@@ -140,22 +140,22 @@ wg_reg_pubkey() { # register the public key using the jwt token
                     error_count=1
                     basen=1
                 elif [ -z "${key_reg##*Expired*}" ] && [ $error_count -eq 1 ]; then
-                    echo "Token is expiring immediately."
+                    echo "[wg_reg_pubkey] Token is expiring immediately."
                     exit 111
                 elif [ -z "${key_reg##*Token not found*}" ]; then
-                    echo "Token was not recognised as a token."
-                    echo "If it fails repeatedly check your credentials and that a token exists."
+                    echo "[wg_reg_pubkey] Token was not recognised as a token."
+                    echo "[wg_reg_pubkey] If it fails repeatedly check your credentials and that a token exists."
                     exit 112
                 fi
             else
-                echo "Unknown error"
+                echo "[wg_reg_pubkey] Unknown error"
                 exit 113
             fi
         fi
     done
     rm -f $token_expires
     echo "${key_reg}" >> $token_expires
-    echo "token requires renewing prior to "$(eval echo $(jq '.expiresAt' $token_expires))
+    echo "[wg_reg_pubkey] token requires renewing prior to "$(eval echo $(jq '.expiresAt' $token_expires))
 }
 
 wg_check_pubkey() { # validates the public key registration process and confirms token expiry
@@ -165,8 +165,8 @@ wg_check_pubkey() { # validates the public key registration process and confirms
     until [ $http_status -eq 200 ]; do
         baseurl=baseurl_$basen
         if [ $basen -gt $urlcount ]; then
-            echo "Public Key was not validated & authorised, please try again."
-            echo "If it fails repeatedly check your credentials and that key registration has completed."
+            echo "[wg_check_pubkey] Public Key was not validated & authorised, please try again."
+            echo "[wg_check_pubkey] If it fails repeatedly check your credentials and that key registration has completed."
             echo $(cat $tmpfile)
             rm $tmpfile
             exit 120
@@ -175,7 +175,7 @@ wg_check_pubkey() { # validates the public key registration process and confirms
         data='{"pubKey":'$(jq '.pub' $wg_keys)'}'
         token="Authorization: Bearer $(eval echo $(jq '.token' $token_file))"
         http_status=$(curl -o $tmpfile -w "%{http_code}" -H "${token}" -H "Content-Type: application/json" -d "${data}" -X POST ${url})
-        echo "[$(date -Iseconds)] Validation "$url $http_status $(cat $tmpfile) >> $sswg_log
+        echo "[$(date -Iseconds)] [wg_check_pubkey] Validation "$url $http_status $(cat $tmpfile) >> $sswg_log
         let basen=$basen+2
     done
     if [ $(eval echo $(jq '.expiresAt' $tmpfile)) != $(eval echo $(jq '.expiresAt' $token_expires)) ]; then
@@ -184,8 +184,11 @@ wg_check_pubkey() { # validates the public key registration process and confirms
         if [ "${now}" '<' "${expire_date}" ]; then
             echo "Current Date & Time  "${now}          # Display Run Date
             echo "Token will Expire at "${expire_date}  # Display Token Expiry
-            logger -t SSWG "RUN DATE:${now}   TOKEN EXPIRES ON: ${expire_date}" # Log Status Information (logread -e SSWG)
+            logger -t SSWG "[wg_check_pubkey] RUN DATE:${now}   TOKEN EXPIRES ON: ${expire_date}" # Log Status Information (logread -e SSWG)
         fi
+        rm -f $token_expires
+        echo "${tmpfile}" >> $token_expires
+        echo "[wg_check_pubkey] token requires renewing prior to "$(eval echo $(jq '.expiresAt' $token_expires))
     fi
     rm $tmpfile
 }
@@ -200,12 +203,12 @@ wg_token_renwal() { # use renewal token to generate new tokens
         data='{"pubKey":'$(jq '.pub' $wg_keys)'}'
         token="Authorization: Bearer $(eval echo $(jq '.renewToken' $token_file))"
         key_ren=$(curl -H "${token}" -H "Content-Type: application/json" -d "${data}" -X POST ${url} | jq '.')
-        echo "[$(date -Iseconds)] Renewal "$url $key_ren >> $sswg_log
+        echo "[$(date -Iseconds)] [wg_token_renwal] Renewal "$url $key_ren >> $sswg_log
         let basen=$basen+2
         if [ -n "${key_ren##*renewToken*}" ] && [ $basen -gt $urlcount ]; then
             if [ -z "${key_ren##*400*}" ]; then
                 if [ -z "${key_ren##*Bad Request*}" ]; then
-                    echo "Curl post appears to be malformed"
+                    echo "[wg_token_renwal] Curl post appears to be malformed"
                     exit 130
                 fi
             elif [ -z "${key_ren##*401*}" ]; then
@@ -219,18 +222,18 @@ wg_token_renwal() { # use renewal token to generate new tokens
                     echo "Token is expiring immediately."
                     exit 131
                 elif [ -z "${key_ren##*Token not found*}" ]; then
-                    echo "Token was not recognised as a token."
-                    echo "If it fails repeatedly check your credentials and that a token exists."
+                    echo "[wg_token_renwal] Token was not recognised as a token."
+                    echo "[wg_token_renwal] If it fails repeatedly check your credentials and that a token exists."
                     exit 132
                 fi
             else
-                echo "Unknown error"
+                echo "[wg_token_renwal] Unknown error"
                 exit 133
             fi
         fi
     done
     echo "${key_ren}" > $token_file
-    echo "token renewed"
+    echo "[wg_token_renwal] token renewed"
 }
 
 get_servers() {
@@ -242,14 +245,14 @@ get_servers() {
         until [ $http_status -eq 200 ]; do
             let basen=$basen+1; baseurl=baseurl_$basen
             if [ $basen -gt $urlcount ]; then
-                echo "Unable to download server information."
+                echo "[get_servers] Unable to download server information."
                 rm $tmpfile
                 exit 140
             fi
             url=$(eval echo \${$baseurl})/v4/server/clusters/$server?countryCode=
             token="Authorization: Bearer $(eval echo $(jq '.token' $token_file))"
             http_status=$(curl -o $tmpfile -w "%{http_code}" -H "${token}" -H "Content-Type: application/json" ${url})
-            echo "[$(date -Iseconds)]" $server" servers "$url $http_status >> $sswg_log
+            echo "[$(date -Iseconds)] [get_servers]" $server" servers "$url $http_status >> $sswg_log
         done
         server_file="$server""_servers_file"
         server_file=$(eval echo \${$server_file})
@@ -302,7 +305,7 @@ gen_client_confs() {
 }
 
 reset_surfshark() {
-    echo "Clearing old settings ..."
+    echo "[reset_surfshark] Clearing old settings ..."
     rm -fr ${config_folder}/configs
     rm -f ${config_folder}/*servers.json
     rm -f ${config_folder}/wg.json
