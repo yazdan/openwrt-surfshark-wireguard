@@ -56,7 +56,7 @@ You can do this by runnimg with -r option to regenerate server list.
 If you are not able to use the generated config files, there might be a chance that there is an
 unhandled corner case in one of the functions. Check that wg.json and token.json files have been
 generated. Review the output, this should show where the script failed. Output is logged to
-sswg.log in the same folder as the script.
+sswg.log in the same folder as the config_folder.
 
 # TODO
 - fold in any updates done by kyndair :).
