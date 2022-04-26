@@ -35,7 +35,7 @@ Use the script at your own risk :).
 We are not responsable if anything goes wrong
 
 ## First time running script
-You may need to run script a few timed with no parameters if you have never run
+You may need to run script a few times with no parameters if you have never run
 script before. This is to make sure all needed files are created and your keys
 are registered.
 If you keep getting registeration errors, wait a bit (no idea how long) and try
@@ -44,7 +44,7 @@ later it eventually will work.
 ## Your private/public key expires
 The token will last around 7 days so it needs to be regenerated before then.
 I run the script with no parameters every 6 days.
-It's also recommendef that a cron job is set to run every day during a known
+It's also recommended that a cron job is set to run every day during a known
 slack period with -n flag to keep your keys refreshed
 
 ## The server list changes every so often and the load changes fairly often.
