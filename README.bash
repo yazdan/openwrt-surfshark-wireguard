@@ -1,5 +1,4 @@
 # Intro
-
 This is a simple script that generates wireguard client config files for
 surfshark
 
@@ -18,7 +17,6 @@ be generated.
 3. run `gen_wg_config.bash`
 
 ## usage
-
 ```bash shell
 Usage: gen_wg_config.bash [-h]
   -g ignore generating profile files
