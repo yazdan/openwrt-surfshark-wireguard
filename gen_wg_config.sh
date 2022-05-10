@@ -120,6 +120,9 @@ wg_check_pubkey() {
         now=$(date -Iseconds --utc)
         if [ "${now}" '<' "${expire_date}" ];then
             register=0
+	printf '%b' "\n\n\tWG AUTHENTICATION KEY REFRESH\n\n    RUN DATE:   "${now}"\n\n"
+	printf '%b' " KEY EXPIRES:   "${expire_date}"\n\n"
+	logger -t SSWG "RUN DATE:${now}   KEYS EXPIRE ON: ${expire_date}"
         fi
     elif [ $http_status -eq 401 ]; then
         rm -f $token_file
