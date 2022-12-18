@@ -188,7 +188,7 @@ wg_check_pubkey() { # validates the public key registration process and confirms
         echo "[$(date -Iseconds)] [wg_check_pubkey] Validation "$url $http_status $(cat $tmpfile) >> $sswg_log
         let basen=$basen+2
     done
-    if [ $(eval echo $(jq '.expiresAt' $tmpfile)) != $(eval echo $(jq '.expiresAt' $token_expires)) ]; then
+    if  [ ! -f "$token_expires" ] || [ "$(jq -r '.expiresAt' "$tmpfile")" != "$(jq -r '.expiresAt' $token_expires)" ]; then
         expire_date=$(eval echo $(jq '.expiresAt' $tmpfile))
         now=$(date -Iseconds -u)
         if [ "${now}" '<' "${expire_date}" ]; then
@@ -326,6 +326,15 @@ reset_surfshark() {
 echo "=========Start Main==========="
 read_config
 parse_arg "$@"
+
+if [ -f "$token_expires" ]; then
+    if [ -f "$wg_keys" ] &&
+       [ "$(jq -r '.pubKey' "$token_expires")" != "$(jq -r '.pub' "$wg_keys")" ] ||
+       [ ! -f "$wg_keys" ]; then
+        echo "Token expires does not match key configuration, removing it"
+        rm -f "$token_expires"
+    fi
+fi
 
 if [ $reset_all -eq 1 ]; then
     echo "--------------"
