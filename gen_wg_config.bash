@@ -88,18 +88,18 @@ wg_gen_keys() { # generate priavte/public key pair
 
 wg_register_pub() { # check to see if the public key has been registered and/or there is an unexpired token & run appropriate modules
     if [ ! -f ${token_expires} ] && [ -f ${wg_keys} ]; then
-        wg_reg_pubkey
+        wg_reg_pubkey || exit $?
         wg_check_pubkey
-    elif [ $(eval echo $(jq '.pubKey' $token_expires)) == $(eval echo $(jq '.pub' $wg_keys)) ] && [ $(eval echo $(jq '.expiresAt' $token_expires)) '<' $(eval echo $(date -Iseconds -u)) ]; then
+    elif [ "$(jq -r '.expiresAt' $token_expires)" '<' "$(date -Iseconds -u)" ]; then
         wg_token_renwal
         wg_check_pubkey
-    elif [ $(eval echo $(jq '.pubKey' $token_expires)) == $(eval echo $(jq '.pub' $wg_keys)) ]; then
+    elif [ -f "${wg_keys}" ]; then
         wg_check_pubkey
     else
         rm -f ${token_file} ${wg_keys}
         wg_login
         wg_gen_keys
-        wg_reg_pubkey
+        wg_reg_pubkey || exit $?
         wg_check_pubkey
     fi
 }
@@ -119,43 +119,53 @@ wg_user_status() { # get current status of user
 wg_reg_pubkey() { # register the public key using the jwt token 
     basen=1
     error_count=0
-    key_reg=start
-    until [ -z "${key_reg##*expiresAt*}" ]; do
+    key_reg=
+    tmpfile=$(mktemp /tmp/wg-curl-val.XXXXXX)
+    until [ -n "$(echo "$key_reg" | jq -r '.expiresAt')" ]; do
         baseurl=baseurl_$basen
-        url=$(eval echo \${$baseurl})/v1/account/users/public-keys
+        url=$(eval echo \${$baseurl})/v1/account${url}/users/public-keys
         data='{"pubKey":'$(jq '.pub' $wg_keys)'}'
         token="Authorization: Bearer $(eval echo $(jq '.token' $token_file))"
-        key_reg=$(curl -H "${token}" -H "Content-Type: application/json" -d "${data}" -X POST ${url} | jq '.')
-        echo "[$(date -Iseconds)] [wg_reg_pubkey] Registration "$url $key_reg >> $sswg_log
+        http_status=$(curl -o "$tmpfile" -s -w "%{http_code}" -H "${token}" -H "Content-Type: application/json" -d "${data}" -X POST "${url}")
         let basen=$basen+2
-        if [ -n "${key_reg##*expiresAt*}" ] && [ $basen -gt $urlcount ]; then
-            if [ -z "${key_reg##*400*}" ]; then
-                if [ -z "${key_reg##*Bad Request*}" ]; then
-                    echo "[wg_reg_pubkey] Curl post appears to be malformed"
-                    exit 110
-                fi
-            elif [ -z "${key_reg##*401*}" ]; then
+
+        if [ $basen -gt $urlcount ] &&
+            [ "$http_status" -lt 200 ] || [ "$http_status" -gt 202 ]; then
+            key_reg=$(cat "$tmpfile")
+            rm "$tmpfile"
+
+            if [ "$http_status" -eq 400 ]; then
+                echo "[wg_reg_pubkey] Curl post appears to be malformed"
+                return 110
+            elif [ "$http_status" -eq 401 ]; then
                 if [ -z "${key_reg##*Expired*}" ] && [ $error_count -eq 0 ]; then
                     wg_token_renwal
                     error_count=1
                     basen=1
                 elif [ -z "${key_reg##*Expired*}" ] && [ $error_count -eq 1 ]; then
                     echo "[wg_reg_pubkey] Token is expiring immediately."
-                    exit 111
+                    return 111
                 elif [ -z "${key_reg##*Token not found*}" ]; then
                     echo "[wg_reg_pubkey] Token was not recognised as a token."
                     echo "[wg_reg_pubkey] If it fails repeatedly check your credentials and that a token exists."
-                    exit 112
+                    return 112
                 fi
-            else
-                echo "[wg_reg_pubkey] Unknown error"
-                exit 113
+            elif [ "$http_status" -eq 409 ]; then
+                echo "[wg_reg_pubkey] Trying to register a key that is already registered"
+                return 113
             fi
+
+            echo "[wg_reg_pubkey] Got HTTP error: $http_status, $key_reg"
+            return 114
         fi
+
+        key_reg=$(jq '.' "$tmpfile")
+        echo "[$(date -Iseconds)] [wg_reg_pubkey] Registration "$url $key_reg >> $sswg_log
     done
     rm -f $token_expires
     echo "${key_reg}" >> $token_expires
     echo "[wg_reg_pubkey] token requires renewing prior to "$(eval echo $(jq '.expiresAt' $token_expires))
+    rm "$tmpfile"
 }
 
 wg_check_pubkey() { # validates the public key registration process and confirms token expiry
@@ -394,7 +404,8 @@ echo "========================="
 # 110 "Curl post appears to be malformed"
 # 111 "Token is expiring immediately."
 # 112 "Token was not recognised as a token."
-# 113 "Unknown error"
+# 113 "Conflict, key is already registered as manual key"
+# 114 "Unknown error"
 #
 # wg_check_pubkey()
 # 120 "Public Key was not validated & authorised, please try again."
