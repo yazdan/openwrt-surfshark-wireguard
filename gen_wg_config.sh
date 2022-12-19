@@ -2,7 +2,7 @@
 set -e
 
 parse_arg() {
-    while getopts 'fhg' opt; do
+    while getopts 'fhgk:' opt; do
         case "$opt" in
             f)
             force_register=1
@@ -10,10 +10,14 @@ parse_arg() {
             g)
             generate_conf=0
             ;;
+            k)
+            wg_prv="$OPTARG"
+            ;;
             ?|h)
             echo "Usage: $(basename $0) [-f]"
             echo "  -f force register ignore checking"
             echo "  -g ignore generating profile files"
+            echo "  -k <key> use provided private key"
             exit 1
             ;;
         esac
@@ -88,15 +92,21 @@ select_servers () {
 }
 
 wg_gen_keys() {
-    if [ -f "$wg_keys" ]; then
+    if [ -z "$wg_prv" ] && [ -f "$wg_keys" ]; then
         echo "wg keys already exist"
         wg_pub=$(cat $wg_keys | jq '.pub')
         wg_prv=$(cat $wg_keys | jq '.prv')
         wg_prv=$(eval echo $wg_prv)
-    else 
-        wg_prv=$(wg genkey)
+    else
+        if [ -z "$wg_prv" ]; then
+            wg_prv=$(wg genkey)
+        fi
+
         wg_pub=$(echo $wg_prv | wg pubkey)
-        echo "{\"pub\":\"$wg_pub\", \"prv\":\"$wg_prv\"}" > $wg_keys
+
+        if [ ! -f "$wg_keys" ]; then
+            echo "{\"pub\":\"$wg_pub\", \"prv\":\"$wg_prv\"}" > $wg_keys
+        fi
     fi
 }
 
@@ -107,6 +117,61 @@ wg_reg_pubkey() {
     curl_res=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
 }
 
+wg_key_data_check() {
+    keyinfo="$1"
+
+    now=$(date -Iseconds --utc)
+    expire_date=$(echo "$keyinfo" | jq -r '.expiresAt')
+
+    if [ "${now}" '<' "${expire_date}" ]; then
+        register=0
+        printf '%b' "\n\tWG AUTHENTICATION KEY REFRESH\n\n    RUN DATE:   ${now}\n\n"
+        printf '%b' " KEY EXPIRES:   ${expire_date}\n\n"
+        logger -t SSWG "RUN DATE:${now}   KEYS EXPIRE ON: ${expire_date}"
+
+        return 0
+    fi
+
+    return 1
+}
+
+wg_get_registered() {
+    tmpfile=$(mktemp /tmp/wg-curl-res.XXXX)
+    url="$baseurl/v1/account/users/public-keys"
+    token=$(eval echo "$token")
+    http_status=$(eval curl -o "$tmpfile" -s -w "%{http_code}" \
+        -H \"Authorization: Bearer "$token"\" \
+        -H \"Content-Type: application/json\" -X GET "$url")
+    if [ "$http_status" -eq 200 ]; then
+        cat "$tmpfile"
+    elif [ "$http_status" -eq 401 ]; then
+        rm -f "$token_file"
+        echo "Unauthorized. Please run again"
+        rm "$tmpfile"
+        exit 1
+    fi
+}
+
+wg_check_registered_pubkeys() {
+    registered="$(wg_get_registered)"
+    n_keys=$(echo "$registered" | jq '. | length')
+
+    for i in $(seq 0 "$((n_keys-1))"); do
+        keyinfo="$(echo "$registered" | jq '.['"$i"']')"
+        pubkey=$(echo "$keyinfo" | jq '.pubKey')
+        if [ "$pubkey" = "$wg_pub" ]; then
+            name=$(echo "$keyinfo" | jq -r '.name')
+            echo "pubkey for key '$name' found"
+            if wg_key_data_check "$keyinfo"; then
+                return 0
+            fi
+            break
+        fi
+    done
+
+    return 1
+}
+
 wg_check_pubkey() {
     tmpfile=$(mktemp /tmp/wg-curl-res.XXXXXX)
     url="$baseurl/v1/account/users/public-keys/validate"
@@ -115,15 +180,7 @@ wg_check_pubkey() {
     http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
     if [ $http_status -eq 200 ]; then
         curl_res=$(cat $tmpfile)
-        expire_date=$(echo $curl_res | jq '.expiresAt')
-        expire_date=$(eval echo $expire_date)
-        now=$(date -Iseconds --utc)
-        if [ "${now}" '<' "${expire_date}" ];then
-            register=0
-	printf '%b' "\n\n\tWG AUTHENTICATION KEY REFRESH\n\n    RUN DATE:   "${now}"\n\n"
-	printf '%b' " KEY EXPIRES:   "${expire_date}"\n\n"
-	logger -t SSWG "RUN DATE:${now}   KEYS EXPIRE ON: ${expire_date}"
-        fi
+        wg_key_data_check "$curl_res"
     elif [ $http_status -eq 401 ]; then
         rm -f $token_file
         echo "Unauthorized. Please run again"
@@ -175,7 +232,9 @@ wg_gen_keys
 
 if [ $force_register -eq 0 ]; then
     echo "Checking pubkey ..."
-    wg_check_pubkey
+    if ! wg_check_registered_pubkeys; then
+        wg_check_pubkey
+    fi
 fi
 
 if [ $register -eq 1 ]; then
