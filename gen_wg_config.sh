@@ -2,7 +2,7 @@
 set -e
 
 parse_arg() {
-    while getopts 'fhgn:k:l' opt; do
+    while getopts 'fhgn:k:ld:' opt; do
         case "$opt" in
             f)
             force_register=1
@@ -12,6 +12,9 @@ parse_arg() {
             ;;
             l)
             list_registered=1
+            ;;
+            d)
+            delete_registered="$OPTARG"
             ;;
             n)
             key_name="$OPTARG"
@@ -26,6 +29,7 @@ parse_arg() {
             echo "  -n <name> create a manual named key"
             echo "  -k <key> use provided private key"
             echo "  -l list registered manual keys"
+            echo "  -d <key-id> delete registered manual key"
             exit 1
             ;;
         esac
@@ -204,6 +208,24 @@ wg_list_registered() {
     done
 }
 
+wg_delete_registered() {
+    url="$baseurl/v1/account/users/public-keys/$delete_registered"
+    token=$(eval echo "$token")
+    http_status=$(eval curl -o /dev/null -s -w "%{http_code}" \
+        -H \"Authorization: Bearer "$token"\" \
+        -H \"Content-Type: application/json\" -X DELETE "$url")
+
+    if [ "$http_status" = 200 ]; then
+        return 0
+    elif [ "$http_status" = 404 ]; then
+        echo "Deletion failed: key '$delete_registered' not found"
+    else
+        echo "Deletion failed: $http_status"
+    fi
+
+    exit 1
+}
+
 wg_check_registered_pubkeys() {
     registered="$(wg_get_registered)"
     n_keys=$(echo "$registered" | jq '. | length')
@@ -277,6 +299,11 @@ login
 
 if [ $list_registered -eq 1 ]; then
     wg_list_registered
+    exit
+fi
+
+if [ -n "$delete_registered" ]; then
+    wg_delete_registered
     exit
 fi
 
