@@ -2,13 +2,16 @@
 set -e
 
 parse_arg() {
-    while getopts 'fhgk:' opt; do
+    while getopts 'fhgn:k:' opt; do
         case "$opt" in
             f)
             force_register=1
             ;;
             g)
             generate_conf=0
+            ;;
+            n)
+            key_name="$OPTARG"
             ;;
             k)
             wg_prv="$OPTARG"
@@ -17,6 +20,7 @@ parse_arg() {
             echo "Usage: $(basename $0) [-f]"
             echo "  -f force register ignore checking"
             echo "  -g ignore generating profile files"
+            echo "  -n <name> create a manual named key"
             echo "  -k <key> use provided private key"
             exit 1
             ;;
@@ -111,8 +115,14 @@ wg_gen_keys() {
 }
 
 wg_reg_pubkey() {
+    echo "registering pubkey..."
     url="$baseurl/v1/account/users/public-keys"
-    data="{\"pubKey\": $wg_pub}"
+    if [ -n "$key_name" ]; then
+        data='{"pubKey": "'$wg_pub'", "name": "'$key_name'", "manual": true}'
+    else
+        data='{"pubKey": "'$wg_pub'"}'
+    fi
+
     token=$(eval echo $token)
     curl_res=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
 }
@@ -122,11 +132,17 @@ wg_key_data_check() {
 
     now=$(date -Iseconds --utc)
     expire_date=$(echo "$keyinfo" | jq -r '.expiresAt')
+    name=$(echo "$keyinfo" | jq -r '.name')
+
+    if [ -n "$key_name" ] && [ "$key_name" != "$name" ]; then
+        echo "Provided name '$key_name' does not match key '$name'"
+        exit 1
+    fi
 
     if [ "${now}" '<' "${expire_date}" ]; then
         register=0
         printf '%b' "\n\tWG AUTHENTICATION KEY REFRESH\n\n    RUN DATE:   ${now}\n\n"
-        printf '%b' " KEY EXPIRES:   ${expire_date}\n\n"
+        printf '%b' "$name KEY EXPIRES:   ${expire_date}\n\n"
         logger -t SSWG "RUN DATE:${now}   KEYS EXPIRE ON: ${expire_date}"
 
         return 0
@@ -238,7 +254,7 @@ if [ $force_register -eq 0 ]; then
 fi
 
 if [ $register -eq 1 ]; then
-    echo "Registring pubkey ..."
+    echo "Registring pubkey $key_name..."
     wg_reg_pubkey
 else
     echo "No need to register pubkey"
