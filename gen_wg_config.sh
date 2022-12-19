@@ -267,18 +267,36 @@ wg_check_pubkey() {
 gen_client_confs() {
     postf=".surfshark.com"
     mkdir -p $srv_conf_file_folder
-    server_hosts=$(echo "${cat_res}" | jq -c '.[] | [.connectionName, .pubKey]')
+    server_hosts=$(echo "${cat_res}" | jq -c '.[] | [.connectionName, .pubKey, .tags]')
     for row in $server_hosts; do
-        srv_host="$(echo $row | jq '.[0]')"
-        srv_host=$(eval echo $srv_host)
+        srv_host="$(echo $row | jq -r '.[0]')"
+        srv_pub="$(echo $row | jq -r '.[1]')"
+        srv_tags="$(echo $row | jq -r '.[2]')"
 
-        srv_pub="$(echo $row | jq '.[1]')"
-        srv_pub=$(eval echo $srv_pub)
+        basename=ss-${srv_host%$postf}
+        basename=${basename%.prod}
 
-        echo "generating config for $srv_host"
+        taginfo=
+        if [ "$(echo "$srv_tags" | jq -r 'index("p2p")')" != 'null' ]; then
+            basename="${basename}-p2p"
+            taginfo="p2p"
+        fi
+        if [ "$(echo "$srv_tags" | jq -r 'index("virtual")')" != 'null' ]; then
+            basename="${basename}-v"
+            if [ -z "$taginfo" ]; then
+                taginfo="virtual"
+            else
+                taginfo="${taginfo}, virtual"
+            fi
+        fi
 
-        srv_conf_file="${srv_conf_file_folder}/${srv_host%$postf}.conf"
+        if [ -n "$taginfo" ]; then
+            echo "generating config for $srv_host ($taginfo)"
+        else
+            echo "generating config for $srv_host"
+        fi
 
+        srv_conf_file="${srv_conf_file_folder}/${basename}.conf"
         srv_conf="[Interface]\nPrivateKey=$wg_prv\nAddress=10.14.0.2/8\nMTU=1350\n\n[Peer]\nPublicKey=o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo=\nAllowedIPs=172.16.0.36/32\nEndpoint=wgs.prod.surfshark.com:51820\nPersistentKeepalive=25\n\n[Peer]\nPublicKey=$srv_pub\nAllowedIPs=0.0.0.0/0\nEndpoint=$srv_host:51820\nPersistentKeepalive=25\n"
 
         uci_conf=""
