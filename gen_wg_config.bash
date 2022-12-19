@@ -37,11 +37,12 @@ read_config() {
 }
 
 parse_arg() {
-    while getopts 'hgnrZ' opt; do
+    while getopts 'hgnrZk:' opt; do
         case "$opt" in
             Z)  reset_all=1         ;;
             g)  generate_conf=0     ;;
             n)  renew_token=1       ;;
+            k)  wg_prv="$OPTARG"    ;;
             r)  generate_servers=1  ;;
             ?|h)
             echo "Usage: $(basename $0) [-h]"
@@ -49,6 +50,7 @@ parse_arg() {
             echo "  -n renew tokens"
             echo "  -r regenerate the server conf files"
             echo "  -Z clear settings, keys and server profile files"
+            echo "  -k <key> use provided private key"
             exit 1                  ;;
         esac
     done
@@ -79,8 +81,12 @@ wg_login() { #login and recieve jwt token and renewal token
 }
 
 wg_gen_keys() { # generate priavte/public key pair
-    echo "[wg_gen_keys] generating new keys"
-    wg_prv=$(wg genkey)
+    if [ -z "$wg_prv" ]; then
+        echo "[wg_gen_keys] generating new keys"
+        wg_prv=$(wg genkey)
+    else
+        echo "[wg_gen_keys] generating public key"
+    fi
     wg_pub=$(echo $wg_prv | wg pubkey)
     rm -f $wg_keys
     echo -e "{\n\t\"pub\":\"$wg_pub\",\n\t\"prv\":\"$wg_prv\"\n}" >> $wg_keys
