@@ -124,7 +124,7 @@ wg_reg_pubkey() { # register the public key using the jwt token
     until [ -n "$(echo "$key_reg" | jq -r '.expiresAt')" ]; do
         baseurl=baseurl_$basen
         url=$(eval echo \${$baseurl})/v1/account${url}/users/public-keys
-        data='{"pubKey":'$(jq '.pub' $wg_keys)'}'
+        data='{"pubKey": "'$wg_pub'"}'
         token="Authorization: Bearer $(eval echo $(jq '.token' $token_file))"
         http_status=$(curl -o "$tmpfile" -s -w "%{http_code}" -H "${token}" -H "Content-Type: application/json" -d "${data}" -X POST "${url}")
         let basen=$basen+2
@@ -182,7 +182,7 @@ wg_check_pubkey() { # validates the public key registration process and confirms
             exit 120
         fi
         url=$(eval echo \${$baseurl})/v1/account/users/public-keys/validate
-        data='{"pubKey":'$(jq '.pub' $wg_keys)'}'
+        data='{"pubKey": "'$wg_pub'"}'
         token="Authorization: Bearer $(eval echo $(jq '.token' $token_file))"
         http_status=$(curl -o $tmpfile -w "%{http_code}" -H "${token}" -H "Content-Type: application/json" -d "${data}" -X POST ${url})
         echo "[$(date -Iseconds)] [wg_check_pubkey] Validation "$url $http_status $(cat $tmpfile) >> $sswg_log
@@ -209,7 +209,7 @@ wg_token_renwal() { # use renewal token to generate new tokens
     until [ -z "${key_ren##*renewToken*}" ]; do
         baseurl=baseurl_$basen
         url=$(eval echo \${$baseurl})/v1/auth/renew
-        data='{"pubKey":'$(jq '.pub' $wg_keys)'}'
+        data='{"pubKey": "'$wg_pub'"}'
         token="Authorization: Bearer $(eval echo $(jq '.renewToken' $token_file))"
         key_ren=$(curl -H "${token}" -H "Content-Type: application/json" -d "${data}" -X POST ${url} | jq '.')
         echo "[$(date -Iseconds)] [wg_token_renwal] Renewal "$url $key_ren >> $sswg_log
@@ -304,7 +304,7 @@ gen_client_confs() {
             srv_conf_file=${config_folder}/configs/${file_name}.conf
 
             echo -e "#$srv_host SERVER:[$server] LOAD:[$srv_load] TAGS:[$srv_tags] PUB:[$srv_pub}" > $srv_conf_file
-            srv_conf="[Interface]\nPrivateKey=$(eval echo $(jq '.prv' $wg_keys))\nAddress=10.14.0.2/8\n\n[Peer]\nPublicKey=o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo=\nAllowedIPs=172.16.0.36/32\nEndpoint=wgs.prod.surfshark.com:51820\nPersistentKeepalive=25\n\n[Peer]\nPublicKey=$srv_pub\nAllowedIPs=0.0.0.0/0\nEndpoint=${srv_host}:51820\nPersistentKeepalive=25\n"
+            srv_conf="[Interface]\nPrivateKey=$wg_prv\nAddress=10.14.0.2/8\n\n[Peer]\nPublicKey=o07k/2dsaQkLLSR0dCI/FUd3FLik/F/HBBcOGUkNQGo=\nAllowedIPs=172.16.0.36/32\nEndpoint=wgs.prod.surfshark.com:51820\nPersistentKeepalive=25\n\n[Peer]\nPublicKey=$srv_pub\nAllowedIPs=0.0.0.0/0\nEndpoint=${srv_host}:51820\nPersistentKeepalive=25\n"
             echo -e "$srv_conf" >> $srv_conf_file
         done
         file_removal="$server""_servers_file"
@@ -376,6 +376,16 @@ echo "------------------------"
 echo "-------------------"
 echo "Generating keys ..."
 if [ -f "$wg_keys" ]; then
+    wg_prv=$(jq -r .prv "$wg_keys")
+    wg_pub=$(echo "$wg_prv" | wg pubkey)
+
+    if [ "$(jq -r .pub "$wg_keys")" != "$wg_pub" ]; then
+        echo "Pubkey mismatch"
+        wg_pub=
+    fi
+fi
+
+if [ -n "$wg_prv" ] && [ -n "$wg_pub" ]; then
     echo "using existent wg keys"
 else
     wg_gen_keys
