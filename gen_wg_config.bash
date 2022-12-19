@@ -196,11 +196,10 @@ wg_check_pubkey() { # validates the public key registration process and confirms
             echo "Token will Expire at "${expire_date}  # Display Token Expiry
             logger -t SSWG "[wg_check_pubkey] RUN DATE:${now}   TOKEN EXPIRES ON: ${expire_date}" # Log Status Information (logread -e SSWG)
         fi
-        rm -f $token_expires
-        echo "${tmpfile}" >> $token_expires
+        mv "${tmpfile}" "$token_expires"
         echo "[wg_check_pubkey] token requires renewing prior to "$(eval echo $(jq '.expiresAt' $token_expires))
     fi
-    rm $tmpfile
+    rm -f "$tmpfile"
 }
 
 wg_token_renwal() { # use renewal token to generate new tokens
