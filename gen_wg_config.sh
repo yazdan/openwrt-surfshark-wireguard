@@ -2,7 +2,7 @@
 set -e
 
 parse_arg() {
-    while getopts 'fhgn:k:ld:' opt; do
+    while getopts 'fhgn:k:ld:z:' opt; do
         case "$opt" in
             f)
             force_register=1
@@ -22,6 +22,10 @@ parse_arg() {
             k)
             wg_prv="$OPTARG"
             ;;
+            z)
+            save_zip=1
+            zip_file="$OPTARG"
+            ;;
             ?|h)
             echo "Usage: $(basename $0) [-f]"
             echo "  -f force register ignore checking"
@@ -30,6 +34,7 @@ parse_arg() {
             echo "  -k <key> use provided private key"
             echo "  -l list registered manual keys"
             echo "  -d <key-id> delete registered manual key"
+            echo "  -z [zip-file] zip archive in which to save the config files"
             exit 1
             ;;
         esac
@@ -350,5 +355,9 @@ fi
 if [ $generate_conf -eq 1 ]; then
 echo "Generating profiles..."
     gen_client_confs
+
+    if [ "$save_zip" ]; then
+        zip -j -r "${zip_file:-${config_folder}/config.zip}" "$srv_conf_file_folder"
+    fi
 fi
 echo "Done!"
