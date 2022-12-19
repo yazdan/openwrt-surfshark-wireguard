@@ -124,15 +124,24 @@ wg_reg_pubkey() {
     fi
 
     token=$(eval echo $token)
-    curl_res=$(eval curl -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
+    curl_res=$(eval curl -s -H \"Authorization: Bearer "$token"\" \
+        -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
+    wg_key_data_check "$curl_res"
 }
 
 wg_key_data_check() {
     keyinfo="$1"
+    is_refresh="$2"
 
     now=$(date -Iseconds --utc)
     expire_date=$(echo "$keyinfo" | jq -r '.expiresAt')
     name=$(echo "$keyinfo" | jq -r '.name')
+    error_code=$(echo "$keyinfo" | jq -r '.code')
+
+    if [ "$error_code" != "null" ]; then
+        echo "Error $error_code: $(echo "$keyinfo" | jq -r '.message')"
+        exit 1
+    fi
 
     if [ -n "$key_name" ] && [ "$key_name" != "$name" ]; then
         echo "Provided name '$key_name' does not match key '$name'"
@@ -141,7 +150,9 @@ wg_key_data_check() {
 
     if [ "${now}" '<' "${expire_date}" ]; then
         register=0
-        printf '%b' "\n\tWG AUTHENTICATION KEY REFRESH\n\n    RUN DATE:   ${now}\n\n"
+        if [ -n "$is_refresh" ]; then
+            printf '%b' "\n\tWG AUTHENTICATION KEY REFRESH\n\n    RUN DATE:   ${now}\n\n"
+        fi
         printf '%b' "$name KEY EXPIRES:   ${expire_date}\n\n"
         logger -t SSWG "RUN DATE:${now}   KEYS EXPIRE ON: ${expire_date}"
 
@@ -196,7 +207,7 @@ wg_check_pubkey() {
     http_status=$(eval curl -o $tmpfile -s -w "%{http_code}" -H \"Authorization: Bearer $token\" -H \"Content-Type: application/json\"  -d \'$data\' -X POST $url)
     if [ $http_status -eq 200 ]; then
         curl_res=$(cat $tmpfile)
-        wg_key_data_check "$curl_res"
+        wg_key_data_check "$curl_res" "true"
     elif [ $http_status -eq 401 ]; then
         rm -f $token_file
         echo "Unauthorized. Please run again"
