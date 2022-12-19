@@ -88,7 +88,14 @@ wg_gen_keys() { # generate priavte/public key pair
 
 wg_register_pub() { # check to see if the public key has been registered and/or there is an unexpired token & run appropriate modules
     if [ ! -f ${token_expires} ] && [ -f ${wg_keys} ]; then
-        wg_reg_pubkey || exit $?
+        if wg_reg_pubkey; then
+            true
+        else
+            reg_exit_code=$?
+            if [ $reg_exit_code -ne 113 ]; then
+                exit $reg_exit_code
+            fi
+        fi
         wg_check_pubkey
     elif [ "$(jq -r '.expiresAt' $token_expires)" '<' "$(date -Iseconds -u)" ]; then
         wg_token_renwal
@@ -168,7 +175,73 @@ wg_reg_pubkey() { # register the public key using the jwt token
     rm "$tmpfile"
 }
 
+wg_udpate_expire_token() {
+    key_data="$1"
+
+    if  [ ! -f "$token_expires" ] ||
+        [ "$(echo "$key_data" | jq -r '.expiresAt')" != "$(jq -r '.expiresAt' "$token_expires")" ]; then
+        expire_date=$(echo "$key_data" | jq -r '.expiresAt')
+        now=$(date -Iseconds -u)
+        if [ "${now}" '<' "${expire_date}" ]; then
+            echo "Current Date & Time  "${now}          # Display Run Date
+            echo "Token will Expire at "${expire_date}  # Display Token Expiry
+            logger -t SSWG "[wg_check_pubkey] RUN DATE:${now}   TOKEN EXPIRES ON: ${expire_date}" # Log Status Information (logread -e SSWG)
+        fi
+        echo "${key_data}" > "$token_expires"
+        echo "[wg_check_pubkey] token requires renewing prior to $expire_date"
+    fi
+}
+
+wg_get_registered() {
+    tmpfile=$(mktemp /tmp/wg-curl-val.XXXXXX)
+    http_status=0
+    basen=1
+
+    until [ "$http_status" -eq 200 ]; do
+        baseurl=baseurl_$basen
+        if [ $basen -gt $urlcount ]; then
+            return 1
+        fi
+
+        url=$(eval echo \${"$baseurl"})/v1/account/users/public-keys
+        token="Authorization: Bearer $(jq -r '.token' "$token_file")"
+        http_status=$(curl -o "$tmpfile" -s -w "%{http_code}" -H "${token}" \
+            -H "Content-Type: application/json" -d "${data}" -X GET "${url}")
+        let basen=$basen+2
+    done
+
+    cat "$tmpfile"
+    rm -f "$tmpfile"
+}
+
+wg_check_registered_pubkeys() {
+    registered="$(wg_get_registered)"
+    if [ $? != 0 ]; then
+        echo "[wg_get_registered] impossible to get the registered keys"
+        return 1
+    fi
+
+    n_keys=$(echo "$registered" | jq '. | length')
+
+    for i in $(seq 0 "$((n_keys-1))"); do
+        keyinfo="$(echo "$registered" | jq '.['"$i"']')"
+        pubkey=$(echo "$keyinfo" | jq -r '.pubKey')
+        if [ "$pubkey" = "$wg_pub" ]; then
+            name=$(echo "$keyinfo" | jq -r '.name')
+            echo "pubkey '$name' found"
+            wg_udpate_expire_token "$keyinfo"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 wg_check_pubkey() { # validates the public key registration process and confirms token expiry
+    if wg_check_registered_pubkeys; then
+        return 0
+    fi
+
     tmpfile=$(mktemp /tmp/wg-curl-val.XXXXXX)
     http_status=0
     basen=1
@@ -188,17 +261,7 @@ wg_check_pubkey() { # validates the public key registration process and confirms
         echo "[$(date -Iseconds)] [wg_check_pubkey] Validation "$url $http_status $(cat $tmpfile) >> $sswg_log
         let basen=$basen+2
     done
-    if  [ ! -f "$token_expires" ] || [ "$(jq -r '.expiresAt' "$tmpfile")" != "$(jq -r '.expiresAt' $token_expires)" ]; then
-        expire_date=$(eval echo $(jq '.expiresAt' $tmpfile))
-        now=$(date -Iseconds -u)
-        if [ "${now}" '<' "${expire_date}" ]; then
-            echo "Current Date & Time  "${now}          # Display Run Date
-            echo "Token will Expire at "${expire_date}  # Display Token Expiry
-            logger -t SSWG "[wg_check_pubkey] RUN DATE:${now}   TOKEN EXPIRES ON: ${expire_date}" # Log Status Information (logread -e SSWG)
-        fi
-        mv "${tmpfile}" "$token_expires"
-        echo "[wg_check_pubkey] token requires renewing prior to "$(eval echo $(jq '.expiresAt' $token_expires))
-    fi
+    wg_udpate_expire_token "$(cat "$tmpfile")"
     rm -f "$tmpfile"
 }
 
