@@ -2,13 +2,16 @@
 set -e
 
 parse_arg() {
-    while getopts 'fhgn:k:' opt; do
+    while getopts 'fhgn:k:l' opt; do
         case "$opt" in
             f)
             force_register=1
             ;;
             g)
             generate_conf=0
+            ;;
+            l)
+            list_registered=1
             ;;
             n)
             key_name="$OPTARG"
@@ -22,6 +25,7 @@ parse_arg() {
             echo "  -g ignore generating profile files"
             echo "  -n <name> create a manual named key"
             echo "  -k <key> use provided private key"
+            echo "  -l list registered manual keys"
             exit 1
             ;;
         esac
@@ -46,6 +50,7 @@ read_config() {
     token_file="${config_folder}/token.json"
 
     baseurl="https://api.surfshark.com"
+    list_registered=0
     force_register=0
     register=1
     generate_conf=1
@@ -179,6 +184,26 @@ wg_get_registered() {
     fi
 }
 
+wg_list_registered() {
+    registered="$(wg_get_registered)"
+    n_keys=$(echo "$registered" | jq '. | length')
+
+    if [ "$n_keys" -gt 0 ]; then
+        echo " Name ¦ Public Key ¦ Expiration date ¦ Creation date ¦ ID"
+        echo "---------------------------------------------------------"
+    fi
+
+    for i in $(seq 0 "$((n_keys-1))"); do
+        keyinfo="$(echo "$registered" | jq '.['"$i"']')"
+        name=$(echo "$keyinfo" | jq -r '.name')
+        pubkey=$(echo "$keyinfo" | jq -r '.pubKey')
+        id=$(echo "$keyinfo" | jq -r '.id')
+        expiration=$(echo "$keyinfo" | jq -r '.expiresAt')
+        creation=$(echo "$keyinfo" | jq -r '.createdAt')
+        echo "$name ¦ $pubkey ¦ $expiration ¦ $creation ¦ $id"
+    done
+}
+
 wg_check_registered_pubkeys() {
     registered="$(wg_get_registered)"
     n_keys=$(echo "$registered" | jq '. | length')
@@ -249,6 +274,12 @@ parse_arg "$@"
 
 echo "Loggin in if needed ..."
 login
+
+if [ $list_registered -eq 1 ]; then
+    wg_list_registered
+    exit
+fi
+
 echo "Getting the list of servers ..."
 get_servers
 echo "Selecting servers ..."
